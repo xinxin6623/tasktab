@@ -41,32 +41,6 @@ fn default_progress_file() -> String {
     "PROGRESS.md".to_string()
 }
 
-// ───────────────────────── PROGRESS.md frontmatter schema（02 §1.1）─────────────────────────
-
-#[derive(Debug, Deserialize)]
-struct Frontmatter {
-    #[serde(default)]
-    project: Option<String>,
-    // desc 可选：项目一句话描述，卡片展示用；缺省按空串处理（02 §1.1）
-    #[serde(default)]
-    desc: Option<String>,
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    stages: Vec<String>,
-    #[serde(default)]
-    current_stage: Option<i64>,
-    // stage_progress 可选，缺省按 0 处理（02 §1.1）
-    #[serde(default)]
-    stage_progress: Option<f64>,
-    #[serde(default)]
-    next: Vec<String>,
-    #[serde(default)]
-    blocked_by: Vec<String>,
-    #[serde(default)]
-    updated: Option<String>,
-}
-
 // ───────────────────────── 对前端输出的结构（序列化为 JSON）─────────────────────────
 
 /// 单个项目卡片数据。error 非 None 时表示降级卡片，前端显示「⚠ ...」+ 打开文件按钮。
@@ -106,9 +80,6 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    fn format(msg: impl Into<String>) -> Self {
-        ParseError { kind: "format".into(), message: msg.into() }
-    }
     fn missing(msg: impl Into<String>) -> Self {
         ParseError { kind: "missing".into(), message: msg.into() }
     }
@@ -161,24 +132,6 @@ pub fn default_registry_path() -> PathBuf {
     expand_tilde("~/.ai-vault/taskboard/registry.yaml")
 }
 
-// ───────────────────────── 核心：整体进度公式（02 §1.1）─────────────────────────
-
-/// 计算整体进度百分比 0..=100。
-/// 公式：(current_stage - 1 + stage_progress/100) / len(stages) * 100
-/// status 为 done 时强制 100%。
-/// 注意：调用方需保证 stages 非空、current_stage 合法，否则属于「格式异常」由上游拦截。
-fn compute_overall(status: &str, current_stage: i64, stage_progress: f64, stage_count: usize) -> f64 {
-    if status == "done" {
-        return 100.0;
-    }
-    if stage_count == 0 {
-        return 0.0;
-    }
-    let sp = stage_progress.clamp(0.0, 100.0);
-    let ratio = ((current_stage - 1) as f64 + sp / 100.0) / stage_count as f64;
-    (ratio * 100.0).clamp(0.0, 100.0)
-}
-
 // ───────────────────────── frontmatter 提取 ─────────────────────────
 
 /// 从 PROGRESS.md 全文中切出 YAML frontmatter 块（首行须为 `---`，到下一个 `---` 结束）。
@@ -205,10 +158,6 @@ fn extract_frontmatter(content: &str) -> Option<&str> {
     None
 }
 
-/// 对外暴露 frontmatter 提取（registry.rs 沿用已有 project id 时需要）。
-pub fn extract_frontmatter_pub(content: &str) -> Option<&str> {
-    extract_frontmatter(content)
-}
 
 /// 提取 frontmatter 之后的正文（用于详情页 markdown 只读预览）。
 /// 没有合法 frontmatter 时返回去掉 BOM 的全文（防御性：绝不崩溃）。
@@ -347,6 +296,138 @@ fn split_name_desc(text: &str) -> (String, String) {
     (text.to_string(), String::new())
 }
 
+// ─────────── 三件套字段提取（看板字段新来源，替代 PROGRESS.md）───────────
+
+/// AGENTS.md frontmatter 里的看板元信息（status + desc）。
+struct AgentsMeta {
+    status: Option<String>,
+    desc: String,
+}
+
+/// 解析 AGENTS.md frontmatter 取 status / desc（卡片级元信息）。
+/// 文件缺失 / 无 frontmatter / YAML 损坏 → status=None、desc 空（防御性）。
+fn parse_agents_meta(agents_md: &str) -> AgentsMeta {
+    let fm = match extract_frontmatter(agents_md) {
+        Some(f) => f,
+        None => return AgentsMeta { status: None, desc: String::new() },
+    };
+    let val: serde_yaml::Value = match serde_yaml::from_str(fm) {
+        Ok(v) => v,
+        Err(_) => return AgentsMeta { status: None, desc: String::new() },
+    };
+    let get = |k: &str| {
+        val.get(k)
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    AgentsMeta {
+        status: get("status"),
+        desc: get("desc").unwrap_or_default(),
+    }
+}
+
+/// 由阶段表 checkbox 算整体进度：完成数 / 总数 ×100。
+/// status=done 强制 100；空表返回 0。
+fn compute_progress_from_stages(stages: &[StageItem], status: &str) -> f64 {
+    if status == "done" {
+        return 100.0;
+    }
+    if stages.is_empty() {
+        return 0.0;
+    }
+    let done = stages.iter().filter(|s| s.done).count();
+    (done as f64 / stages.len() as f64 * 100.0).clamp(0.0, 100.0)
+}
+
+/// 从 INDEX.md `## 当前接力点 (Handoff)` 区解析 next 与 blocked_by。
+/// 约定：列表行 `- xxx` 为 next；以 `⚠` 或 `阻塞` 开头的行归 blocked_by。
+/// 区缺失 / 为空 / 整段是 HTML 注释占位 → 两个都空（防御性）。
+fn extract_handoff(index_md: &str) -> (Vec<String>, Vec<String>) {
+    // 标题字面可能带 "(Handoff)" 后缀，宽松匹配 "## 当前接力点"
+    let section = match extract_section_prefix(index_md, "当前接力点") {
+        Some(s) => s,
+        None => return (vec![], vec![]),
+    };
+    let mut next = vec![];
+    let mut blocked = vec![];
+    for raw in section.lines() {
+        let line = raw.trim();
+        // 跳过 HTML 注释占位
+        if line.starts_with("<!--") || line.starts_with("-->") || line.is_empty() {
+            continue;
+        }
+        let item = match line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+            Some(s) => s.trim(),
+            None => continue,
+        };
+        if item.starts_with('⚠') || item.starts_with("阻塞") {
+            // 去掉前缀符号与「阻塞：」标记
+            let b = item
+                .trim_start_matches('⚠')
+                .trim_start()
+                .trim_start_matches("阻塞")
+                .trim_start_matches(['：', ':'])
+                .trim();
+            if !b.is_empty() {
+                blocked.push(b.to_string());
+            }
+        } else {
+            next.push(item.to_string());
+        }
+    }
+    (next, blocked)
+}
+
+/// extract_section 的宽松版：标题以 `## <prefix>` 开头即匹配（容忍标题后缀）。
+fn extract_section_prefix(md: &str, prefix: &str) -> Option<String> {
+    let target = format!("## {prefix}");
+    let mut lines = md.lines();
+    loop {
+        let line = lines.next()?;
+        if line.trim().starts_with(&target) {
+            break;
+        }
+    }
+    let mut buf = String::new();
+    for line in lines {
+        if line.trim_start().starts_with("## ") {
+            break;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    let s = buf.trim().to_string();
+    if s.is_empty() { None } else { Some(s) }
+}
+
+/// 抓 CHANGELOG.md 里最新（最靠上）的 `## YYYY-MM-DD` 流水条目日期。
+/// 找不到 → 空串。
+fn extract_changelog_date(changelog_md: &str) -> String {
+    for line in changelog_md.lines() {
+        let t = line.trim();
+        // 形如 "## 2026-06-14 #feat ..." —— 取标题后首个 ISO 日期
+        if let Some(rest) = t.strip_prefix("## ") {
+            let token = rest.split_whitespace().next().unwrap_or("");
+            if is_iso_date(token) {
+                return token.to_string();
+            }
+        }
+    }
+    String::new()
+}
+
+/// 粗校验 YYYY-MM-DD（不校验月份天数合法性，足够过滤标题）。
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && b[..4].iter().all(u8::is_ascii_digit)
+        && b[5..7].iter().all(u8::is_ascii_digit)
+        && b[8..].iter().all(u8::is_ascii_digit)
+}
+
 // ───────────────────────── 单项目解析 ─────────────────────────
 
 /// 解析单个 registry 条目为一张卡片。永不 panic。
@@ -366,7 +447,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
                 pinned: entry.pinned,
                 desc: c.desc,
                 status: c.status,
-                stages: c.stages,
+                stages: c.stage_names,
                 current_stage: c.current_stage,
                 stage_progress: c.stage_progress,
                 overall_progress: c.overall_progress,
@@ -395,71 +476,51 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
         }
     };
 
-    // 1) 文件缺失检查（02 §1.2）：path 不存在 或 progress_file 缺失
+    // 1) 项目路径必须存在
     if !project_root.exists() {
         return make_card(Some(ParseError::missing(format!("项目路径不存在: {}", project_root.display()))), None);
     }
-    if !progress_path.exists() {
-        return make_card(Some(ParseError::missing(format!("找不到进度文件: {}", progress_path.display()))), None);
-    }
 
-    // 2) 读文件（读失败也按文件缺失降级，绝不 panic）
-    let content = match std::fs::read_to_string(&progress_path) {
-        Ok(c) => c,
-        Err(e) => return make_card(Some(ParseError::missing(format!("读取进度文件失败: {e}"))), None),
-    };
+    // 2) 读三件套（各自防御性：读失败 → 空串，绝不 panic）
+    let agents_md = std::fs::read_to_string(project_root.join("AGENTS.md")).unwrap_or_default();
+    let index_md = std::fs::read_to_string(project_root.join("INDEX.md")).unwrap_or_default();
+    let changelog_md = std::fs::read_to_string(project_root.join("CHANGELOG.md")).unwrap_or_default();
 
-    // 3) 提取 frontmatter
-    let fm_text = match extract_frontmatter(&content) {
-        Some(t) => t,
-        None => return make_card(Some(ParseError::format("缺少 YAML frontmatter")), None),
-    };
+    let meta = parse_agents_meta(&agents_md);
+    let stages = extract_stage_list(&changelog_md);
 
-    // 4) YAML 解析（失败 → 格式异常）
-    let fm: Frontmatter = match serde_yaml::from_str(fm_text) {
-        Ok(f) => f,
-        Err(e) => return make_card(Some(ParseError::format(format!("YAML 解析失败: {e}"))), None),
-    };
+    // 3) 判断三件套是否提供了看板信息：有 status frontmatter 或有阶段表即算"已接入"
+    let has_trio_data = meta.status.is_some() || !stages.is_empty();
 
-    // 5) 语义校验（02 §1.1）：stages 为空 / current_stage 越界 → 格式异常
-    if fm.stages.is_empty() {
-        return make_card(Some(ParseError::format("stages 为空")), None);
-    }
-    let current_stage = match fm.current_stage {
-        Some(n) => n,
-        None => return make_card(Some(ParseError::format("缺少 current_stage")), None),
-    };
-    if current_stage < 1 || current_stage as usize > fm.stages.len() {
+    if has_trio_data {
+        let status = meta.status.unwrap_or_else(|| "active".into());
+        let (next, blocked_by) = extract_handoff(&index_md);
+        let overall = compute_progress_from_stages(&stages, &status);
+        let done_count = stages.iter().filter(|s| s.done).count();
+        let updated = extract_changelog_date(&changelog_md);
         return make_card(
-            Some(ParseError::format(format!(
-                "current_stage={} 越界（stages 共 {} 项）",
-                current_stage,
-                fm.stages.len()
-            ))),
             None,
+            Some(FmComputed {
+                desc: meta.desc,
+                status,
+                // current_stage 兼容字段：指向首个未完成阶段（1-based）
+                current_stage: (done_count + 1) as i64,
+                stage_progress: 0.0, // 阶段内细粒度进度已由 checkbox 取代
+                overall_progress: overall,
+                stage_names: stages.iter().map(|s| s.name.clone()).collect(),
+                next,
+                blocked_by,
+                updated,
+            }),
         );
     }
 
-    // 6) 正常路径：计算整体进度
-    let status = fm.status.clone().unwrap_or_else(|| "active".into());
-    let stage_progress = fm.stage_progress.unwrap_or(0.0);
-    let overall = compute_overall(&status, current_stage, stage_progress, fm.stages.len());
-
-    let _ = fm.project; // schema 字段保留，App 不强制校验与 registry id 一致
-
+    // 4) 三件套无看板信息 → 降级「未接入看板」卡片（PROGRESS.md 已退役，不再回退）
     make_card(
+        Some(ParseError::missing(
+            "未接入看板：请在 AGENTS.md frontmatter 加 status，CHANGELOG.md 加「## 项目阶段」（可用 /outkanban 一键生成）",
+        )),
         None,
-        Some(FmComputed {
-            desc: fm.desc.unwrap_or_default(),
-            status,
-            stages: fm.stages,
-            current_stage,
-            stage_progress,
-            overall_progress: overall,
-            next: fm.next,
-            blocked_by: fm.blocked_by,
-            updated: fm.updated.unwrap_or_default(),
-        }),
     )
 }
 
@@ -467,7 +528,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
 struct FmComputed {
     desc: String,
     status: String,
-    stages: Vec<String>,
+    stage_names: Vec<String>,
     current_stage: i64,
     stage_progress: f64,
     overall_progress: f64,
@@ -568,7 +629,9 @@ pub fn load_board() -> Board {
 /// 仅用于文件监听（watcher.rs）；与 load_board 共用 registry 解析，保证监听集合与看板一致。
 /// 防御性：registry 不存在 / 解析失败 → 返回空列表（不报错，由 load_board 那条路负责降级展示）。
 /// 注意：返回的路径可能尚不存在（项目刚登记、文件还没建），监听层需自行处理「父目录监听 + 文件未创建」。
-pub fn collect_progress_paths_from(registry_path: &Path) -> Vec<PathBuf> {
+/// 收集所有需要监听的看板数据文件：每个项目的三件套（AGENTS/INDEX/CHANGELOG）
+/// + 兼容期保留 PROGRESS.md。文件改动 → 看板刷新。
+pub fn collect_watched_files_from(registry_path: &Path) -> Vec<PathBuf> {
     if !registry_path.exists() {
         return vec![];
     }
@@ -580,11 +643,15 @@ pub fn collect_progress_paths_from(registry_path: &Path) -> Vec<PathBuf> {
         Ok(r) => r,
         Err(_) => return vec![],
     };
-    registry
-        .projects
-        .iter()
-        .map(|e| expand_tilde(&e.path).join(&e.progress_file))
-        .collect()
+    let mut out = vec![];
+    for e in &registry.projects {
+        let root = expand_tilde(&e.path);
+        out.push(root.join("AGENTS.md"));
+        out.push(root.join("INDEX.md"));
+        out.push(root.join("CHANGELOG.md"));
+        out.push(root.join(&e.progress_file)); // 兼容期：未迁移项目仍看 PROGRESS.md
+    }
+    out
 }
 
 // ───────────────────────── 详情页：load_project（M3）─────────────────────────
@@ -678,6 +745,16 @@ mod tests {
         root
     }
 
+    /// 建一个「已接入看板」的三件套项目：AGENTS(status/desc) + CHANGELOG(阶段表) + INDEX(Handoff)。
+    fn make_trio_project(tmp: &Path, dir: &str, agents: &str, changelog: &str, index: &str) -> PathBuf {
+        let root = tmp.join(dir);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("AGENTS.md"), agents).unwrap();
+        std::fs::write(root.join("CHANGELOG.md"), changelog).unwrap();
+        std::fs::write(root.join("INDEX.md"), index).unwrap();
+        root
+    }
+
     fn write_registry(tmp: &Path, body: &str) -> PathBuf {
         let p = tmp.join("registry.yaml");
         std::fs::write(&p, body).unwrap();
@@ -696,33 +773,6 @@ mod tests {
         ));
         std::fs::create_dir_all(&base).unwrap();
         base
-    }
-
-    // ───── 进度公式 ─────
-    #[test]
-    fn test_overall_formula_basic() {
-        // current_stage=3, stage_progress=60, 4 阶段 → (3-1+0.6)/4 = 0.65 → 65%
-        let v = compute_overall("active", 3, 60.0, 4);
-        assert!((v - 65.0).abs() < 1e-9, "got {v}");
-    }
-
-    #[test]
-    fn test_overall_done_forced_100() {
-        // done 强制 100，无论阶段数值
-        let v = compute_overall("done", 1, 0.0, 4);
-        assert_eq!(v, 100.0);
-    }
-
-    #[test]
-    fn test_overall_first_stage_zero_progress() {
-        // current_stage=1, sp=0, 4 阶段 → 0%
-        assert_eq!(compute_overall("active", 1, 0.0, 4), 0.0);
-    }
-
-    #[test]
-    fn test_overall_last_stage_full() {
-        // current_stage=4, sp=100, 4 阶段 → (4-1+1)/4 = 1.0 → 100%
-        assert_eq!(compute_overall("active", 4, 100.0, 4), 100.0);
     }
 
     // ───── frontmatter 提取 ─────
@@ -744,18 +794,32 @@ mod tests {
     fn test_load_board_three_good_one_bad() {
         let tmp = unique_tmp();
 
-        let good1 = "---\nproject: voice-pipeline\nstatus: active\nstages:\n  - 需求与架构\n  - ASR 接入\n  - barge-in 状态机\n  - 联调打包\ncurrent_stage: 3\nstage_progress: 60\nnext:\n  - 打断信号去抖逻辑\n  - 写集成测试\n  - 第三条不该显示\nblocked_by: []\nupdated: 2026-06-13\n---\n# 阶段记录\n";
-        let good2 = "---\nproject: alpha\nstatus: done\nstages:\n  - a\n  - b\ncurrent_stage: 2\nstage_progress: 50\nupdated: 2026-06-10\n---\n正文\n";
-        let good3 = "---\nproject: beta\nstatus: paused\nstages:\n  - 一\n  - 二\n  - 三\ncurrent_stage: 1\nupdated: 2026-06-01\n---\n正文\n"; // stage_progress 缺省→0
-        let bad = "---\nproject: broken\nstatus: active\nstages: []\ncurrent_stage: 5\nupdated: oops\n---\n正文\n"; // stages 空 + 越界
-
-        let p1 = make_project(&tmp, "voice", Some(good1));
-        let p2 = make_project(&tmp, "alpha", Some(good2));
-        let p3 = make_project(&tmp, "beta", Some(good3));
-        let p4 = make_project(&tmp, "broken", Some(bad));
+        // voice：active，4 阶段勾 3 → 75%
+        let p1 = make_trio_project(
+            &tmp, "voice",
+            "---\nstatus: active\ndesc: 语音管线\n---\n",
+            "## 项目阶段\n- [x] 需求与架构\n- [x] ASR 接入\n- [x] barge-in 状态机\n- [ ] 联调打包\n\n## 2026-06-13 #feat - x\n",
+            "## 当前接力点 (Handoff)\n- 打断信号去抖逻辑\n",
+        );
+        // alpha：done
+        let p2 = make_trio_project(
+            &tmp, "alpha",
+            "---\nstatus: done\n---\n",
+            "## 项目阶段\n- [x] a\n- [x] b\n\n## 2026-06-10 #feat - x\n",
+            "",
+        );
+        // beta：paused，pinned
+        let p3 = make_trio_project(
+            &tmp, "beta",
+            "---\nstatus: paused\n---\n",
+            "## 项目阶段\n- [ ] 一\n- [ ] 二\n- [ ] 三\n\n## 2026-06-01 #chore - x\n",
+            "",
+        );
+        // broken：只有空目录，无任何三件套看板信息 → missing 降级
+        let p4 = make_project(&tmp, "broken", None);
 
         let reg = format!(
-            "version: 1\nprojects:\n  - id: voice-pipeline\n    name: 语音管线\n    path: {}\n    progress_file: PROGRESS.md\n    pinned: false\n    added: 2026-06-13\n  - id: alpha\n    name: Alpha\n    path: {}\n    pinned: false\n  - id: beta\n    name: Beta\n    path: {}\n    pinned: true\n  - id: broken\n    name: 坏项目\n    path: {}\n",
+            "version: 1\nprojects:\n  - id: voice-pipeline\n    name: 语音管线\n    path: {}\n    pinned: false\n  - id: alpha\n    name: Alpha\n    path: {}\n    pinned: false\n  - id: beta\n    name: Beta\n    path: {}\n    pinned: true\n  - id: broken\n    name: 坏项目\n    path: {}\n",
             p1.display(), p2.display(), p3.display(), p4.display()
         );
         let regp = write_registry(&tmp, &reg);
@@ -774,16 +838,16 @@ mod tests {
         assert_eq!(board.projects.first().unwrap().id, "beta", "pinned 应置顶");
         assert_eq!(board.projects.last().unwrap().id, "alpha", "done 应排末尾");
 
-        // voice 进度 = 65%
+        // voice 进度 = 3/4 = 75%
         let voice = board.projects.iter().find(|c| c.id == "voice-pipeline").unwrap();
         assert!(voice.error.is_none());
-        assert!((voice.overall_progress - 65.0).abs() < 1e-9);
-        assert_eq!(voice.current_stage, 3);
+        assert!((voice.overall_progress - 75.0).abs() < 1e-9);
         assert_eq!(voice.stages.len(), 4);
+        assert_eq!(voice.next, vec!["打断信号去抖逻辑".to_string()]);
 
-        // broken 必须是 format 错误且不崩溃
+        // broken 必须降级（missing）且不崩溃
         let broken = board.projects.iter().find(|c| c.id == "broken").unwrap();
-        assert_eq!(broken.error.as_ref().unwrap().kind, "format");
+        assert_eq!(broken.error.as_ref().unwrap().kind, "missing");
     }
 
     // ───── 详情页：正文提取 + load_project ─────
@@ -800,10 +864,14 @@ mod tests {
     }
 
     #[test]
-    fn test_load_project_returns_body() {
+    fn test_load_project_detail_from_trio() {
         let tmp = unique_tmp();
-        let good = "---\nproject: voice-pipeline\nstatus: active\nstages:\n  - a\n  - b\ncurrent_stage: 2\nstage_progress: 30\nnext:\n  - n1\n  - n2\n  - n3\nblocked_by:\n  - 等待上游接口\nupdated: 2026-06-13\n---\n## 阶段记录\n\n- 干了点活\n";
-        let p1 = make_project(&tmp, "voice", Some(good));
+        let p1 = make_trio_project(
+            &tmp, "voice",
+            "---\nstatus: active\ndesc: 语音\n---\n",
+            "## 项目阶段\n- [x] a\n- [ ] b\n\n## 2026-06-13 #feat - x\n",
+            "## 当前接力点 (Handoff)\n- n1\n- n2\n- n3\n- ⚠ 阻塞：等待上游接口\n",
+        );
         let reg = format!(
             "version: 1\nprojects:\n  - id: voice-pipeline\n    name: 语音管线\n    path: {}\n",
             p1.display()
@@ -811,9 +879,9 @@ mod tests {
         let regp = write_registry(&tmp, &reg);
         let detail = load_project_from(&regp, "voice-pipeline").unwrap();
         assert!(detail.card.error.is_none());
-        assert_eq!(detail.card.next.len(), 3); // 详情页要完整 next（不止两条）
+        assert_eq!(detail.card.next.len(), 3); // 详情页完整 next
         assert_eq!(detail.card.blocked_by, vec!["等待上游接口".to_string()]);
-        assert!(detail.body.contains("干了点活"));
+        assert_eq!(detail.stages.len(), 2);
         // 未知 id 报错
         assert!(load_project_from(&regp, "ghost").is_err());
     }
@@ -872,22 +940,83 @@ mod tests {
         assert!(extract_stage_list("## 别的\n- [x] 不该被抓").is_empty());
     }
 
+    // ───── 三件套新字段来源 ─────
+    #[test]
+    fn test_parse_agents_meta() {
+        let m = parse_agents_meta("---\ntrio: standard-v2\nstatus: paused\ndesc: 一句话描述\n---\n# 正文");
+        assert_eq!(m.status.as_deref(), Some("paused"));
+        assert_eq!(m.desc, "一句话描述");
+        // 无 frontmatter → 都空
+        let m2 = parse_agents_meta("# 没有 frontmatter");
+        assert!(m2.status.is_none());
+        assert_eq!(m2.desc, "");
+    }
+
+    #[test]
+    fn test_compute_progress_from_stages() {
+        let s = |done: bool| StageItem { name: "x".into(), desc: "".into(), done };
+        // 2/4 = 50%
+        assert_eq!(compute_progress_from_stages(&[s(true), s(true), s(false), s(false)], "active"), 50.0);
+        // done 强制 100
+        assert_eq!(compute_progress_from_stages(&[s(false)], "done"), 100.0);
+        // 空表 → 0
+        assert_eq!(compute_progress_from_stages(&[], "active"), 0.0);
+    }
+
+    #[test]
+    fn test_extract_handoff_next_and_blocked() {
+        let idx = "# T\n\n## 当前接力点 (Handoff)\n- 写集成测试\n- ⚠ 阻塞：等待上游接口\n- 打包发布\n\n## 项目定位\nxxx";
+        let (next, blocked) = extract_handoff(idx);
+        assert_eq!(next, vec!["写集成测试".to_string(), "打包发布".to_string()]);
+        assert_eq!(blocked, vec!["等待上游接口".to_string()]);
+        // 区缺失 → 都空
+        let (n2, b2) = extract_handoff("# 无 handoff");
+        assert!(n2.is_empty() && b2.is_empty());
+    }
+
+    #[test]
+    fn test_extract_handoff_skips_html_comment() {
+        let idx = "## 当前接力点 (Handoff)\n<!-- 当前没有接力点。 -->\n";
+        let (next, blocked) = extract_handoff(idx);
+        assert!(next.is_empty() && blocked.is_empty());
+    }
+
+    #[test]
+    fn test_extract_changelog_date() {
+        let cl = "# CHANGELOG\n\n## 格式规范\n\n## 2026-06-14 #feat scope:x - 主题\n- Why: ...\n## 2026-06-01 #fix - 旧的\n";
+        assert_eq!(extract_changelog_date(cl), "2026-06-14"); // 取最靠上的日期条目
+        assert_eq!(extract_changelog_date("# 无日期条目\n## 格式规范"), "");
+    }
+
+    #[test]
+    fn test_parse_entry_prefers_trio_over_progress() {
+        let tmp = unique_tmp();
+        // 同时有 PROGRESS（旧）和三件套（新）：应优先三件套
+        let root = make_project(&tmp, "v", Some("---\nproject: v\nstatus: paused\nstages:\n  - 老阶段\ncurrent_stage: 1\n---\n"));
+        std::fs::write(root.join("AGENTS.md"), "---\nstatus: active\ndesc: 新描述\n---\n").unwrap();
+        std::fs::write(root.join("CHANGELOG.md"), "## 项目阶段\n- [x] 一 — d1\n- [ ] 二\n\n## 2026-06-14 #feat - x\n").unwrap();
+        std::fs::write(root.join("INDEX.md"), "## 当前接力点 (Handoff)\n- 做二\n").unwrap();
+        let reg = format!("version: 1\nprojects:\n  - id: v\n    name: V\n    path: {}\n", root.display());
+        let regp = write_registry(&tmp, &reg);
+        let board = load_board_from(&regp);
+        let c = &board.projects[0];
+        assert!(c.error.is_none());
+        assert_eq!(c.status, "active");          // 来自 AGENTS，不是 PROGRESS 的 paused
+        assert_eq!(c.desc, "新描述");
+        assert_eq!(c.overall_progress, 50.0);    // 1/2 checkbox
+        assert_eq!(c.next, vec!["做二".to_string()]);
+        assert_eq!(c.updated, "2026-06-14");
+    }
+
     #[test]
     fn test_load_project_reads_trio_blocks() {
         let tmp = unique_tmp();
-        let good = "---\nproject: voice\nstatus: active\nstages:\n  - a\ncurrent_stage: 1\nupdated: 2026-06-13\n---\n正文\n";
-        let root = make_project(&tmp, "voice", Some(good));
-        // 写 INDEX.md / CHANGELOG.md 到项目根
-        std::fs::write(
-            root.join("INDEX.md"),
-            "## 项目简介\n一句话简介。\n\n## 架构图\n```mermaid\nflowchart TD\n  A --> B\n```\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("CHANGELOG.md"),
+        let root = make_trio_project(
+            &tmp, "voice",
+            "---\nstatus: active\n---\n",
             "## 项目阶段\n- [x] 阶段一 — 完成了\n- [ ] 阶段二\n\n## 2026-06-13 #feat - 流水\n",
-        )
-        .unwrap();
+            "## 项目简介\n一句话简介。\n\n## 架构图\n```mermaid\nflowchart TD\n  A --> B\n```\n",
+        );
         let reg = format!(
             "version: 1\nprojects:\n  - id: voice\n    name: V\n    path: {}\n",
             root.display()
@@ -903,14 +1032,14 @@ mod tests {
 
     // ───── 防御性：各类坏数据 ─────
     #[test]
-    fn test_missing_progress_file() {
+    fn test_unconfigured_project_is_missing() {
+        // 项目目录在，但无 AGENTS status / 无 CHANGELOG 阶段表 → 「未接入看板」missing
         let tmp = unique_tmp();
-        let root = make_project(&tmp, "noprog", None); // 不写 PROGRESS.md
+        let root = make_project(&tmp, "noprog", None);
         let reg = format!("version: 1\nprojects:\n  - id: noprog\n    name: NoProg\n    path: {}\n", root.display());
         let regp = write_registry(&tmp, &reg);
         let board = load_board_from(&regp);
-        let c = &board.projects[0];
-        assert_eq!(c.error.as_ref().unwrap().kind, "missing");
+        assert_eq!(board.projects[0].error.as_ref().unwrap().kind, "missing");
     }
 
     #[test]
@@ -926,40 +1055,22 @@ mod tests {
     }
 
     #[test]
-    fn test_no_frontmatter_is_format_error() {
+    fn test_broken_agents_frontmatter_no_panic() {
+        // AGENTS frontmatter 损坏但有阶段表 → 仍按阶段表渲染，status 缺省 active，不崩
         let tmp = unique_tmp();
-        let root = make_project(&tmp, "nofm", Some("# 只有正文没有 frontmatter\n"));
-        let reg = format!("version: 1\nprojects:\n  - id: nofm\n    path: {}\n", root.display());
+        let root = make_trio_project(
+            &tmp, "bad",
+            "---\nstatus: : : broken\n  bad indent\n---\n",
+            "## 项目阶段\n- [x] a\n- [ ] b\n\n## 2026-06-13 #feat - x\n",
+            "",
+        );
+        let reg = format!("version: 1\nprojects:\n  - id: bad\n    path: {}\n", root.display());
         let regp = write_registry(&tmp, &reg);
         let board = load_board_from(&regp);
-        assert_eq!(board.projects[0].error.as_ref().unwrap().kind, "format");
-    }
-
-    #[test]
-    fn test_broken_yaml_is_format_error() {
-        let tmp = unique_tmp();
-        // 故意写坏 YAML：缩进/冒号混乱
-        let bad = "---\nproject: x\nstages:\n  - a\n   - b   bad indent: : :\ncurrent_stage: [unterminated\n---\n";
-        let root = make_project(&tmp, "badyaml", Some(bad));
-        let reg = format!("version: 1\nprojects:\n  - id: badyaml\n    path: {}\n", root.display());
-        let regp = write_registry(&tmp, &reg);
-        let board = load_board_from(&regp);
-        // 不崩溃，且被标记 format
-        assert_eq!(board.projects[0].error.as_ref().unwrap().kind, "format");
-    }
-
-    #[test]
-    fn test_unknown_fields_ignored() {
-        let tmp = unique_tmp();
-        // schema 外字段 foo/bar 应被忽略，不影响正常解析（向前兼容）
-        let c = "---\nproject: fwd\nstatus: active\nstages:\n  - a\n  - b\ncurrent_stage: 1\nstage_progress: 50\nfoo: 123\nbar:\n  nested: true\nupdated: 2026-06-13\n---\n";
-        let root = make_project(&tmp, "fwd", Some(c));
-        let reg = format!("version: 1\nprojects:\n  - id: fwd\n    path: {}\n", root.display());
-        let regp = write_registry(&tmp, &reg);
-        let board = load_board_from(&regp);
-        let card = &board.projects[0];
-        assert!(card.error.is_none(), "未知字段不应导致错误");
-        assert!((card.overall_progress - 25.0).abs() < 1e-9); // (1-1+0.5)/2=0.25
+        let c = &board.projects[0];
+        assert!(c.error.is_none(), "frontmatter 损坏不应崩，按阶段表降级渲染");
+        assert_eq!(c.status, "active"); // frontmatter 解析失败 → 缺省 active
+        assert!((c.overall_progress - 50.0).abs() < 1e-9);
     }
 
     #[test]
@@ -990,25 +1101,29 @@ mod tests {
 
     // ───── M4：监听路径收集 ─────
     #[test]
-    fn test_collect_progress_paths() {
+    fn test_collect_watched_files() {
         let tmp = unique_tmp();
         let p1 = make_project(&tmp, "voice", Some("---\nproject: v\nstages:\n  - a\ncurrent_stage: 1\n---\n"));
-        let p2 = make_project(&tmp, "alpha", None); // 文件还没建，仍应收集其预期路径
+        let p2 = make_project(&tmp, "alpha", None);
         let reg = format!(
             "version: 1\nprojects:\n  - id: voice\n    path: {}\n  - id: alpha\n    path: {}\n    progress_file: custom.md\n",
             p1.display(), p2.display()
         );
         let regp = write_registry(&tmp, &reg);
-        let paths = collect_progress_paths_from(&regp);
-        assert_eq!(paths.len(), 2);
-        assert_eq!(paths[0], p1.join("PROGRESS.md"));
-        assert_eq!(paths[1], p2.join("custom.md")); // 自定义 progress_file 也要展开
+        let paths = collect_watched_files_from(&regp);
+        // 每项目 4 个监听文件：AGENTS / INDEX / CHANGELOG / progress_file
+        assert_eq!(paths.len(), 8);
+        assert!(paths.contains(&p1.join("AGENTS.md")));
+        assert!(paths.contains(&p1.join("INDEX.md")));
+        assert!(paths.contains(&p1.join("CHANGELOG.md")));
+        assert!(paths.contains(&p1.join("PROGRESS.md")));
+        assert!(paths.contains(&p2.join("custom.md"))); // 自定义 progress_file 也展开
     }
 
     #[test]
-    fn test_collect_progress_paths_nonexistent_registry_empty() {
+    fn test_collect_watched_files_nonexistent_registry_empty() {
         let tmp = unique_tmp();
-        assert!(collect_progress_paths_from(&tmp.join("nope.yaml")).is_empty());
+        assert!(collect_watched_files_from(&tmp.join("nope.yaml")).is_empty());
     }
 
     #[test]

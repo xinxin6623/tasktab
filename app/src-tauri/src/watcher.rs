@@ -156,7 +156,7 @@ fn rebuild_watches(
 fn compute_watch_targets(registry_path: &Path) -> (HashSet<PathBuf>, HashSet<PathBuf>) {
     let mut files: HashSet<PathBuf> = HashSet::new();
     files.insert(registry_path.to_path_buf());
-    for p in board::collect_progress_paths_from(registry_path) {
+    for p in board::collect_watched_files_from(registry_path) {
         files.insert(p);
     }
 
@@ -240,11 +240,13 @@ mod tests {
         .unwrap();
 
         let (dirs, files) = compute_watch_targets(&reg);
-        // 关心文件：registry + 2 个 PROGRESS.md
+        // 关心文件：registry + 每项目 4 个（AGENTS/INDEX/CHANGELOG/PROGRESS）×2 = 9
         assert!(files.contains(&reg));
-        assert!(files.contains(&p1.join("PROGRESS.md")));
+        assert!(files.contains(&p1.join("AGENTS.md")));
+        assert!(files.contains(&p1.join("CHANGELOG.md")));
+        assert!(files.contains(&p2.join("INDEX.md")));
         assert!(files.contains(&p2.join("PROGRESS.md")));
-        assert_eq!(files.len(), 3);
+        assert_eq!(files.len(), 9);
         // 目录：registry 父目录(=tmp) + 两个项目目录
         assert!(dirs.contains(&tmp));
         assert!(dirs.contains(&p1));
@@ -270,7 +272,8 @@ mod tests {
         )
         .unwrap();
         let (dirs, files) = compute_watch_targets(&reg);
-        assert_eq!(files.len(), 3); // registry + A.md + B.md
+        // registry + 同目录下去重后的 AGENTS/INDEX/CHANGELOG（各 1）+ A.md + B.md = 6
+        assert_eq!(files.len(), 6);
         // 目录去重：registry 父目录(tmp) + mono，共 2 个（两个项目共用 mono）
         assert_eq!(dirs.len(), 2);
         assert!(dirs.contains(&root));
@@ -300,7 +303,7 @@ mod tests {
         )
         .unwrap();
         let (_, files_before) = compute_watch_targets(&reg);
-        assert_eq!(files_before.len(), 2); // registry + voice
+        assert_eq!(files_before.len(), 5); // registry + voice 的 4 个文件
 
         // 模拟 cra add：registry 追加新项目
         let p2 = mkproj(&tmp, "beta");
@@ -314,8 +317,9 @@ mod tests {
         )
         .unwrap();
         let (dirs_after, files_after) = compute_watch_targets(&reg);
-        assert_eq!(files_after.len(), 3); // registry + voice + beta
+        assert_eq!(files_after.len(), 9); // registry + 2 项目 ×4
         assert!(files_after.contains(&p2.join("PROGRESS.md")));
+        assert!(files_after.contains(&p2.join("CHANGELOG.md")));
         assert!(dirs_after.contains(&p2));
     }
 }

@@ -103,70 +103,34 @@ def write_registry_atomic(data: dict) -> None:
         raise
 
 
-def progress_template(project_id: str) -> str:
-    """按 02 §1.1 schema 生成 PROGRESS.md 模板。
-    占位:一个阶段、current_stage=1、stage_progress=0,status 默认 active。"""
-    today = date.today().isoformat()
-    frontmatter = {
-        "project": project_id,
-        "desc": "",  # 项目一句话描述,卡片展示用(≤30 字);留空则卡片不显示该行
-        "status": "active",
-        "stages": ["需求与架构"],  # 占位阶段
-        "current_stage": 1,
-        "stage_progress": 0,
-        "next": [],
-        "blocked_by": [],
-        "updated": today,
-    }
-    fm_text = yaml.safe_dump(
-        frontmatter, allow_unicode=True, sort_keys=False, default_flow_style=False
-    )
-    return f"""---
-{fm_text}---
-
-## 阶段记录
-
-(自由 markdown 正文,App 仅做只读预览渲染,不解析)
-"""
-
-
-def parse_frontmatter(md_path: Path) -> dict | None:
-    """解析 PROGRESS.md frontmatter。解析失败 / 缺失返回 None(调用方降级处理,绝不崩溃)。"""
+def progress_from_changelog(changelog_path: Path) -> float | None:
+    """从 CHANGELOG.md「## 项目阶段」checkbox 算整体进度(0-100)。
+    完成数/总数 ×100。块缺失 / 无 checkbox → None(未接入看板)。
+    与 App 端 board.rs::compute_progress_from_stages 语义一致。"""
     try:
-        text = md_path.read_text(encoding="utf-8")
+        text = changelog_path.read_text(encoding="utf-8")
     except OSError:
         return None
-    # frontmatter 形如 ---\n ... \n---
-    m = re.match(r"^---\s*\n(.*?)\n---\s*(\n|$)", text, re.DOTALL)
-    if not m:
+    # 定位「## 项目阶段」到下一个 ## 之间
+    lines = text.splitlines()
+    in_section = False
+    total = 0
+    done = 0
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            in_section = stripped == "## 项目阶段"
+            continue
+        if not in_section:
+            continue
+        m = re.match(r"^[-*]\s+\[([ xX])\]", stripped)
+        if m:
+            total += 1
+            if m.group(1) in ("x", "X"):
+                done += 1
+    if total == 0:
         return None
-    try:
-        data = yaml.safe_load(m.group(1))
-    except yaml.YAMLError:
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def overall_progress(fm: dict) -> float | None:
-    """按 02 §1.1 公式计算整体进度百分比(0-100)。
-    公式: (current_stage - 1 + stage_progress/100) / len(stages)
-    status==done 强制 100%。无法计算(越界/空 stages/字段缺失)返回 None。"""
-    status = fm.get("status")
-    stages = fm.get("stages")
-    if status == "done":
-        return 100.0
-    if not isinstance(stages, list) or len(stages) == 0:
-        return None
-    n = len(stages)
-    current = fm.get("current_stage")
-    if not isinstance(current, int) or current < 1 or current > n:
-        return None
-    # stage_progress 可选,缺省按 0 处理
-    sp = fm.get("stage_progress", 0)
-    if not isinstance(sp, (int, float)):
-        sp = 0
-    ratio = (current - 1 + sp / 100.0) / n
-    return round(ratio * 100, 1)
+    return round(done / total * 100, 1)
 
 
 @click.group()
@@ -211,19 +175,9 @@ def add(path: str, name: str | None):
             suffix += 1
         project_id = f"{project_id}-{suffix}"
 
-    # 若无 PROGRESS.md 则按 schema 生成模板
-    progress_md = proj_dir / PROGRESS_FILENAME
-    if not progress_md.exists():
-        progress_md.write_text(progress_template(project_id), encoding="utf-8")
-        click.echo(f"已生成模板: {progress_md}")
-    else:
-        # 已有 PROGRESS.md 时复用其 project id(保持与文件一致)
-        fm = parse_frontmatter(progress_md)
-        if fm and isinstance(fm.get("project"), str) and fm["project"].strip():
-            file_id = fm["project"].strip()
-            if file_id not in existing_ids:
-                project_id = file_id
-        click.echo(f"沿用已有 PROGRESS.md: {progress_md}")
+    # PROGRESS.md 已退役：cra add 只登记 registry，不再生成任何文件。
+    # 看板展示字段（status/进度/简介/架构图/阶段表）从三件套读，用 /outkanban 一键生成。
+    click.echo("提示: 看板字段从三件套读，登记后用 /outkanban 生成展示信息")
 
     display_name = name if name else proj_dir.name
     entry = {
@@ -267,17 +221,9 @@ def list_cmd():
         pid = str(p.get("id", "?"))
         pname = str(p.get("name", ""))
         proj_path = Path(str(p.get("path", ""))).expanduser()
-        pf = p.get("progress_file", PROGRESS_FILENAME)
-        md_path = proj_path / pf
-        if not md_path.exists():
-            prog_str = "⚠ 文件缺失"
-        else:
-            fm = parse_frontmatter(md_path)
-            if fm is None:
-                prog_str = "⚠ 格式异常"
-            else:
-                prog = overall_progress(fm)
-                prog_str = "⚠ 格式异常" if prog is None else f"{prog:.1f}%"
+        # 进度从三件套 CHANGELOG.md「## 项目阶段」checkbox 算（PROGRESS.md 已退役）
+        prog = progress_from_changelog(proj_path / "CHANGELOG.md")
+        prog_str = "⚠ 未接入" if prog is None else f"{prog:.1f}%"
         rows.append((pid, pname, prog_str, str(proj_path)))
 
     # 计算列宽(按显示宽度,中文占 2)

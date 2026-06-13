@@ -24,9 +24,9 @@ export function Card({
     onDelete(p);
   };
 
-  // 降级卡片：格式异常 / 文件缺失（仍可进入详情看原因 + 打开文件）
+  // 降级卡片：未接入看板 / 格式异常（仍可进入详情看原因 + 打开文件）
   if (p.error) {
-    const label = p.error.kind === "missing" ? "文件缺失" : "格式异常";
+    const label = p.error.kind === "missing" ? "未接入看板" : "格式异常";
     return (
       <div className="card error clickable" onClick={() => onOpen(p.id)}>
         <div className="card-head">

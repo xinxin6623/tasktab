@@ -33,15 +33,23 @@ pub struct AddResult {
 // ───────────────────────── 工具：日期 / kebab-case ─────────────────────────
 
 /// 返回本地日期 ISO 字符串 YYYY-MM-DD。
-/// 不引第三方时间库，直接用 SystemTime 推算（与 cra.py 的 date.today() 等价为日期级）。
+/// 本地时区的今天日期 YYYY-MM-DD，与 cra.py 的 date.today() 一致。
+/// 优先调系统 `date +%F`（拿本地时区，避免 UTC 跨午夜与 cra.py 差一天）；
+/// 失败时回退 UTC 天数推算（无第三方依赖，仅在 date 不可用时降级）。
 fn today_iso() -> String {
-    // 取本地时区偏移较复杂；这里用 UNIX 天数换算公历，足够日期级精度。
-    // 与 cra.py 一致输出 YYYY-MM-DD。
+    if let Ok(out) = std::process::Command::new("date").arg("+%F").output() {
+        if out.status.success() {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if looks_like_iso_date(&s) {
+                return s;
+            }
+        }
+    }
+    // 回退：UTC 天数换算公历（跨午夜窗口可能与本地差一天，仅降级用）
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    // 加上本地时区偏移（通过 localtime 不可移植，这里读 TZ 偏移近似为系统本地）
     let days = (secs / 86_400) as i64;
     let (y, m, d) = civil_from_days(days);
     format!("{:04}-{:02}-{:02}", y, m, d)
@@ -87,33 +95,6 @@ fn kebab_case(name: &str) -> String {
     } else {
         trimmed
     }
-}
-
-// ───────────────────────── PROGRESS.md 模板（与 cra.py 逐字节对齐）─────────────────────────
-
-/// 按 02 §1.1 生成 PROGRESS.md 模板。
-/// 必须与 cra.py 的 progress_template 输出一致：PyYAML safe_dump(allow_unicode, sort_keys=False)
-/// 对该 frontmatter 的输出形如：
-/// project: <id>
-/// desc: ''
-/// status: active
-/// stages:
-/// - 需求与架构
-/// current_stage: 1
-/// stage_progress: 0
-/// next: []
-/// blocked_by: []
-/// updated: <date>
-pub fn progress_template(project_id: &str) -> String {
-    let today = today_iso();
-    // 注意：PyYAML 默认 block 序列不缩进列表项（"- foo" 与父键同列），这里逐字节复刻。
-    // PyYAML 把 ISO 日期当 timestamp 并加单引号，这里逐字节对齐（updated: '2026-06-13'）。
-    let fm = format!(
-        "project: {project_id}\ndesc: ''\nstatus: active\nstages:\n- 需求与架构\ncurrent_stage: 1\nstage_progress: 0\nnext: []\nblocked_by: []\nupdated: '{today}'\n"
-    );
-    format!(
-        "---\n{fm}---\n\n## 阶段记录\n\n(自由 markdown 正文,App 仅做只读预览渲染,不解析)\n"
-    )
 }
 
 // ───────────────────────── registry 读 / 原子写 ─────────────────────────
@@ -292,24 +273,10 @@ fn write_registry_atomic(path: &Path, doc: &RegistryDoc) -> Result<(), String> {
     Ok(())
 }
 
-// ───────────────────────── frontmatter 中读取已有 project id ─────────────────────────
-
-/// 从已有 PROGRESS.md 读出 frontmatter 里的 project 字段（用于沿用已有 id）。失败返回 None。
-fn read_existing_project_id(md_path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(md_path).ok()?;
-    let fm = crate::board::extract_frontmatter_pub(&content)?;
-    let val: serde_yaml::Value = serde_yaml::from_str(fm).ok()?;
-    val.as_mapping()?
-        .get(serde_yaml::Value::from("project"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-}
-
 // ───────────────────────── 对外：add / remove（core，便于单测注入路径）─────────────────────────
 
 /// App 内添加项目。逻辑与 cra.py 的 add 对齐：
-/// 校验路径 → 已登记同 path 报错 → 生成/沿用 id → 无 PROGRESS.md 则写模板 → 追加并原子写 registry。
+/// 校验路径 → 已登记同 path 报错 → 生成 id → 追加并原子写 registry（不再生成 PROGRESS.md）。
 pub fn add_project_to(
     registry_path: &Path,
     raw_path: &str,
@@ -363,18 +330,9 @@ pub fn add_project_to(
         project_id = format!("{project_id}-{suffix}");
     }
 
-    // 无 PROGRESS.md 则生成模板；有则沿用其 project id（与 cra.py 一致）
-    let progress_md = proj_dir.join(PROGRESS_FILENAME);
-    let mut created_template = false;
-    if !progress_md.exists() {
-        std::fs::write(&progress_md, progress_template(&project_id))
-            .map_err(|e| format!("生成 PROGRESS.md 模板失败: {e}"))?;
-        created_template = true;
-    } else if let Some(file_id) = read_existing_project_id(&progress_md) {
-        if !existing_ids.contains(&file_id) {
-            project_id = file_id;
-        }
-    }
+    // PROGRESS.md 已退役：add 只登记 registry，不再生成任何文件（与 cra.py 一致）。
+    // 看板展示字段从三件套读，登记后用 /outkanban 生成。
+    let created_template = false;
 
     let display_name = name
         .filter(|s| !s.trim().is_empty())
@@ -437,51 +395,25 @@ mod tests {
         assert_eq!(kebab_case("@@@"), "project");
     }
 
-    #[test]
-    fn test_template_format_matches_cra_schema() {
-        let t = progress_template("voice-pipeline");
-        // 必须含 frontmatter 起止 + 02 §1.1 全部字段 + 正文标题
-        assert!(t.starts_with("---\nproject: voice-pipeline\ndesc: ''\nstatus: active\n"));
-        assert!(t.contains("stages:\n- 需求与架构\n"));
-        assert!(t.contains("current_stage: 1\n"));
-        assert!(t.contains("stage_progress: 0\n"));
-        assert!(t.contains("next: []\n"));
-        assert!(t.contains("blocked_by: []\n"));
-        assert!(t.contains("\n---\n\n## 阶段记录\n"));
-        // 模板本身应能被 board 解析器正确解析为合法卡片字段
-        let fm = crate::board::extract_frontmatter_pub(&t).unwrap();
-        let val: serde_yaml::Value = serde_yaml::from_str(fm).unwrap();
-        let m = val.as_mapping().unwrap();
-        assert_eq!(
-            m.get(serde_yaml::Value::from("project")).unwrap().as_str(),
-            Some("voice-pipeline")
-        );
-        assert_eq!(
-            m.get(serde_yaml::Value::from("current_stage"))
-                .unwrap()
-                .as_u64(),
-            Some(1)
-        );
-    }
 
     #[test]
-    fn test_add_creates_template_and_registry() {
+    fn test_add_only_registers_no_file() {
         let tmp = unique_tmp();
         let proj = tmp.join("voice");
         std::fs::create_dir_all(&proj).unwrap();
         let reg = tmp.join("registry.yaml");
 
         let r = add_project_to(&reg, proj.to_str().unwrap(), None).unwrap();
-        assert!(r.created_template);
+        assert!(!r.created_template, "PROGRESS.md 已退役，add 不再建文件");
         assert_eq!(r.id, "voice");
-        assert!(proj.join("PROGRESS.md").exists());
+        assert!(!proj.join("PROGRESS.md").exists(), "不应生成 PROGRESS.md");
 
-        // registry 写出后应能被 board 解析器读回，且字段齐全
+        // registry 可被读回；项目因无三件套看板信息显示「未接入」降级
         let board = crate::board::load_board_from(&reg);
         assert!(board.registry_error.is_none());
         assert_eq!(board.projects.len(), 1);
         assert_eq!(board.projects[0].id, "voice");
-        assert!(board.projects[0].error.is_none());
+        assert_eq!(board.projects[0].error.as_ref().unwrap().kind, "missing");
     }
 
     #[test]
@@ -499,35 +431,19 @@ mod tests {
     }
 
     #[test]
-    fn test_add_reuses_existing_progress_id() {
-        let tmp = unique_tmp();
-        let proj = tmp.join("dirname");
-        std::fs::create_dir_all(&proj).unwrap();
-        // 已有 PROGRESS.md，project id 与目录名不同
-        std::fs::write(
-            proj.join("PROGRESS.md"),
-            "---\nproject: custom-id\nstatus: active\nstages:\n- a\ncurrent_stage: 1\nstage_progress: 0\nnext: []\nblocked_by: []\nupdated: 2026-06-13\n---\n## 阶段记录\n",
-        )
-        .unwrap();
-        let reg = tmp.join("registry.yaml");
-        let r = add_project_to(&reg, proj.to_str().unwrap(), None).unwrap();
-        assert!(!r.created_template, "已有文件不应重新生成");
-        assert_eq!(r.id, "custom-id", "应沿用文件内 project id");
-    }
-
-    #[test]
     fn test_remove_only_touches_registry() {
         let tmp = unique_tmp();
         let proj = tmp.join("keepfiles");
         std::fs::create_dir_all(&proj).unwrap();
+        // 用户项目里的文件（remove 绝不能动）
+        let user_file = proj.join("README.md");
+        std::fs::write(&user_file, "用户内容").unwrap();
         let reg = tmp.join("registry.yaml");
         let r = add_project_to(&reg, proj.to_str().unwrap(), None).unwrap();
-        let md = proj.join("PROGRESS.md");
-        assert!(md.exists());
 
         remove_project_from(&reg, &r.id).unwrap();
         // 项目文件必须完好（仅 registry 改动）
-        assert!(md.exists(), "删除后 PROGRESS.md 必须保留");
+        assert!(user_file.exists(), "删除后用户文件必须保留");
         let doc = read_registry(&reg).unwrap();
         assert!(doc.projects.is_empty());
 
@@ -662,10 +578,9 @@ mod xcheck {
             .replace(py_dir.to_str().unwrap(), "BASE");
         assert_eq!(app_yaml, py_yaml, "registry 必须与 cra.py 字节一致");
 
-        // 2) PROGRESS.md 字节一致
-        let app_md = std::fs::read_to_string(app_dir.join("语音管线/PROGRESS.md")).unwrap();
-        let py_md = std::fs::read_to_string(py_dir.join("语音管线/PROGRESS.md")).unwrap();
-        assert_eq!(app_md, py_md, "PROGRESS.md 模板必须与 cra.py 字节一致");
+        // 2) PROGRESS.md 已退役：两边都不再生成该文件
+        assert!(!app_dir.join("语音管线/PROGRESS.md").exists(), "App add 不应生成 PROGRESS.md");
+        assert!(!py_dir.join("语音管线/PROGRESS.md").exists(), "cra add 不应生成 PROGRESS.md");
 
         // 3) cra list 能正确读取 App 写出的 registry（双向一致）
         let out = run_cra(&["list"], &app_reg);

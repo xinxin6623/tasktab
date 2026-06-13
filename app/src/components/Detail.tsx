@@ -1,12 +1,12 @@
 // Detail.tsx —— 项目详情页。
 // 改版后布局（上→下）：进度条 → blocked_by 警示 → 项目简介(INDEX) → 阶段分块列表(CHANGELOG，10 行+滚动)
 //       → 架构图(INDEX mermaid) → 动作按钮(打开 INDEX.md / VS Code) → 更新+路径。
-// 数据来自三件套：PROGRESS.md(进度/状态) + INDEX.md(简介/架构图) + CHANGELOG.md(阶段表)。
+// 数据全部来自三件套：AGENTS.md(status/desc) + INDEX.md(简介/架构图/Handoff) + CHANGELOG.md(阶段表/日期)。
 // App 端零智能：确定性提取 + mermaid 本地渲染，绝不调 LLM、不做网络请求。
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { ProjectDetail } from "../types";
-import { openInEditor, openIndex, openProgress } from "../actions";
+import { openInEditor, openIndex } from "../actions";
 import { Mermaid } from "./Mermaid";
 import { useToast } from "./Toast";
 
@@ -46,13 +46,6 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const p = detail.card;
 
   // 动作按钮：失败统一 toast 提示
-  const doOpenProgress = async () => {
-    try {
-      await openProgress(p.progress_path);
-    } catch (e) {
-      toast(`打开 PROGRESS.md 失败：${e}`);
-    }
-  };
   const doOpenIndex = async () => {
     try {
       await openIndex(p.path);
@@ -68,14 +61,14 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
     }
   };
 
-  // 降级：格式异常 / 文件缺失 —— 仍给「打开文件」入口
+  // 降级：未接入看板 / 格式异常 —— 仍给「打开文件」入口引导补三件套
   if (p.error) {
-    const label = p.error.kind === "missing" ? "文件缺失" : "格式异常";
+    const label = p.error.kind === "missing" ? "未接入看板" : "格式异常";
     return (
       <DetailShell onBack={onBack} title={p.name} badge={{ cls: "warn", text: `⚠ ${label}` }}>
         <div className="warn-msg detail-block">{p.error.message}</div>
         <div className="detail-actions">
-          <button className="btn" onClick={doOpenProgress}>打开 PROGRESS.md</button>
+          <button className="btn" onClick={doOpenIndex}>打开 INDEX.md</button>
           <button className="btn" onClick={doOpenEditor}>VS Code 打开项目</button>
         </div>
         <div className="detail-path">{p.path}</div>

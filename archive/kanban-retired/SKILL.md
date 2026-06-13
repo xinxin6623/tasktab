@@ -1,10 +1,14 @@
 ---
 name: kanban
 description: 维护当前项目根目录的 PROGRESS.md，让 TaskBoard 看板实时反映真实进度。整个 TaskBoard 系统的"智能"只在这一处——写入端，App 端是纯读取的哑终端。EVERY time you 完成一个任务、结束一段工作、到达里程碑、遇到阻塞、提交或开 PR 前完成一块工作、修好用户在追踪的 bug，或用户说"收尾""更新进度""记录一下""这个阶段完成了""搞定了""wrap up""done for today"，或输入 /kanban 时触发。在含 PROGRESS.md 的仓库里开工时也用它先读当前状态。只要项目根有 PROGRESS.md，就默认需要进度追踪，即使用户没提也主动更新（Claude 有 undertrigger 倾向，宁可偏积极也不要漏触发）。不负责：给没有 PROGRESS.md 的项目擅自创建（提示用 cra add 接入）、改写正文既有内容、动 PROGRESS.md 之外的任何文件、自己计算整体进度（App 算）。
-trigger: /kanban
 ---
 
-# /kanban — Progress Tracker
+> ⚠️ **已退役（2026-06-14）**：PROGRESS.md 整体废弃，真相收敛到三件套。
+> 进度→CHANGELOG `## 项目阶段`、status/desc→AGENTS frontmatter、next→INDEX Handoff。
+> 收尾维护由 **/wrap-up**（agentChatBox-ending）接管，看板字段产出用 **/outkanban**。
+> 本文件仅留存历史，已从四家 agent unlink、myskills 软链已删，**不要再安装**。
+
+# /kanban — Progress Tracker（已退役）
 
 本项目的进度通过根目录 `PROGRESS.md` 对外暴露，TaskBoard 看板实时读取该文件。
 你的职责：让 frontmatter 始终反映真实进度。
