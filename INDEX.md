@@ -8,7 +8,7 @@
 
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。详见 docs/trio-protocol.md §3。
 
-- **2026-06-14**：架构已收敛到三件套（PROGRESS.md + /kanban 退役），App 改读三件套并真机验证通过（cc-switch + tasktab 自身都已发布到看板）。⚠ 阻塞：AGENTS.md/CLAUDE.md 项目宪法仍是旧版（通篇讲 PROGRESS.md/progress-tracker），下一步需按新架构重写宪法 + 跑 `./scripts/install.sh` 正式打包发布。
+- **2026-06-14**：架构已收敛到三件套（PROGRESS.md + /kanban 退役），App 改读三件套并真机验证通过（cc-switch + tasktab 自身都已发布到看板），项目宪法 AGENTS.md 已按新架构重写。下一步：跑 `./scripts/install.sh` 正式打包发布（.app 构建 + 装「应用程序」，留 James 拍板）。
 
 ## 项目简介
 
