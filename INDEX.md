@@ -32,13 +32,11 @@ tasktab/
 ├── AGENTS.md             # agent 操作守则
 ├── INDEX.md              # 本文件
 ├── CHANGELOG.md          # 强标签演绎记录
-└── PROJECT_PROGRESS.md   # 非工程读者进度页
-
-# 以下为 02-实现步骤.md §2 规划、尚未创建的目标结构：
-# ├── app/               # Tauri 2（src/ 前端 + src-tauri/ Rust 后端）
-# ├── cli/cra.py         # 登记 CLI（Python）
-# ├── skill/progress-tracker/SKILL.md
-# └── scripts/install.sh
+├── PROJECT_PROGRESS.md   # 非工程读者进度页
+├── app/                  # Tauri 2（src/ 前端 + src-tauri/ Rust 后端）— M2–M4
+├── cli/cra.py            # 登记 CLI（Python）— M1
+├── skill/progress-tracker/SKILL.md   # 自动写进度 skill — M5
+└── scripts/install.sh    # 一键安装脚本 — M5
 ```
 
 ## 子模块导航
@@ -47,10 +45,10 @@ tasktab/
 |---|---|---|
 | `同步看板files/` | 三份指导文档：产品意图 + 实现步骤 + skill 规则 | 已有（设计权威） |
 | `docs/` | 通用三件套协议 `trio-protocol.md` | 已建 |
-| `cli/` | `cra` CLI（M1 交付） | 待创建 |
-| `app/` | Tauri 2 桌面应用（M2–M4 交付） | 待创建 |
-| `skill/` | `progress-tracker` skill（M5 交付） | 待创建 |
-| `scripts/` | `install.sh` 安装脚本（M5 交付） | 待创建 |
+| `cli/` | `cra` CLI（M1 交付） | ✅ 已完成 |
+| `app/` | Tauri 2 桌面应用（M2–M4 交付） | ✅ 已完成（待真机终验） |
+| `skill/` | `progress-tracker` skill（M5 交付） | ✅ 已完成 |
+| `scripts/` | `install.sh` 安装脚本（M5 交付） | ✅ 已完成 |
 
 ## 常用操作
 

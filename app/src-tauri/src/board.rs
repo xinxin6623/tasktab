@@ -130,13 +130,17 @@ pub struct Summary {
 
 /// 展开开头的 `~` 为用户主目录。容忍中文路径（直接按字节拼接，不做编码假设）。
 pub fn expand_tilde(p: &str) -> PathBuf {
-    if p == "~" {
-        if let Some(home) = home_dir() {
+    expand_tilde_with(p, home_dir())
+}
+
+/// `~` 展开的纯函数核心：home 由调用方注入，不读全局 env。
+/// 单测直接测本函数，避免改写进程级 HOME 造成测试间相互污染（flaky）。
+fn expand_tilde_with(p: &str, home: Option<PathBuf>) -> PathBuf {
+    if let Some(home) = home {
+        if p == "~" {
             return home;
         }
-    }
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
+        if let Some(rest) = p.strip_prefix("~/") {
             return home.join(rest);
         }
     }
@@ -789,9 +793,12 @@ mod tests {
 
     #[test]
     fn test_expand_tilde() {
-        std::env::set_var("HOME", "/Users/test");
-        assert_eq!(expand_tilde("~"), PathBuf::from("/Users/test"));
-        assert_eq!(expand_tilde("~/.ai-vault"), PathBuf::from("/Users/test/.ai-vault"));
-        assert_eq!(expand_tilde("/abs/路径/中文"), PathBuf::from("/abs/路径/中文"));
+        // 注入 home，不改写全局 HOME，避免与并发测试相互污染
+        let home = Some(PathBuf::from("/Users/test"));
+        assert_eq!(expand_tilde_with("~", home.clone()), PathBuf::from("/Users/test"));
+        assert_eq!(expand_tilde_with("~/.ai-vault", home.clone()), PathBuf::from("/Users/test/.ai-vault"));
+        assert_eq!(expand_tilde_with("/abs/路径/中文", home.clone()), PathBuf::from("/abs/路径/中文"));
+        // home 缺失时 ~ 原样保留，不 panic
+        assert_eq!(expand_tilde_with("~/x", None), PathBuf::from("~/x"));
     }
 }
