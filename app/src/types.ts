@@ -11,6 +11,7 @@ export interface ProjectCard {
   path: string;
   progress_path: string;
   pinned: boolean;
+  desc: string; // 项目一句话描述（frontmatter desc，可选；空串则卡片不渲染该行）
   status: string; // active | paused | done | unknown
   stages: string[];
   current_stage: number;
@@ -35,10 +36,20 @@ export interface Board {
   registry_error: string | null;
 }
 
-// 单项目详情：load_project command 返回（卡片字段 + 正文原文）。
+// 阶段分块项（CHANGELOG.md `## 项目阶段` checkbox 列表，与 Rust StageItem 对应）。
+export interface StageItem {
+  name: string;
+  desc: string;
+  done: boolean;
+}
+
+// 单项目详情：load_project command 返回（卡片字段 + 三件套块）。
 export interface ProjectDetail {
   card: ProjectCard;
-  body: string; // frontmatter 之后的正文 markdown 原文
+  body: string; // PROGRESS.md 正文原文（详情页改版后不再渲染，保留兼容）
+  intro: string; // INDEX.md ## 项目简介 块纯文本，缺失为空串
+  arch_mermaid: string; // INDEX.md ## 架构图 下首个 mermaid 块源码，缺失为空串
+  stages: StageItem[]; // CHANGELOG.md ## 项目阶段 列表，缺失为空数组
 }
 
 // App 内添加项目的返回。

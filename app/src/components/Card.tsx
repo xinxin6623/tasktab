@@ -45,8 +45,6 @@ export function Card({
   }
 
   const pct = Math.round(p.overall_progress);
-  const total = p.stages.length;
-  const curName = p.stages[p.current_stage - 1] ?? "";
   const nextTwo = p.next.slice(0, 2); // 卡片仅显示前两条（完整列表在详情页）
 
   return (
@@ -72,15 +70,7 @@ export function Card({
         </div>
       </div>
 
-      <div className="stage-line">
-        阶段 {p.current_stage}/{total}
-        {curName && (
-          <>
-            {" · "}
-            <span className="cur">{curName}</span>
-          </>
-        )}
-      </div>
+      {p.desc && <div className="card-desc">{p.desc}</div>}
 
       {nextTwo.length > 0 && (
         <ul className="next">

@@ -109,6 +109,7 @@ def progress_template(project_id: str) -> str:
     today = date.today().isoformat()
     frontmatter = {
         "project": project_id,
+        "desc": "",  # 项目一句话描述,卡片展示用(≤30 字);留空则卡片不显示该行
         "status": "active",
         "stages": ["需求与架构"],  # 占位阶段
         "current_stage": 1,

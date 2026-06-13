@@ -5,6 +5,10 @@ description: Maintain the project's PROGRESS.md so the TaskBoard kanban app stay
 
 # Progress Tracker
 
+> ⚠️ **已归档（2026-06-13）**：本文件是草稿，已改名为 `kanban`。真实源在本仓
+> `skill/kanban/SKILL.md`；`~/Documents/myskills/kanban` 是软链指向它，由 outskill 分发到各 agent。
+> 命令 `/kanban`。此处仅留存历史，**不要再编辑或安装本文件**；如需改 skill，改 `skill/kanban/`。
+
 本项目的进度通过根目录 `PROGRESS.md` 对外暴露，TaskBoard 看板实时读取该文件。
 你的职责：让 frontmatter 始终反映真实进度。
 

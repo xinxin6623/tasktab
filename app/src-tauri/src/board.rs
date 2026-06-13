@@ -47,6 +47,9 @@ fn default_progress_file() -> String {
 struct Frontmatter {
     #[serde(default)]
     project: Option<String>,
+    // desc 可选：项目一句话描述，卡片展示用；缺省按空串处理（02 §1.1）
+    #[serde(default)]
+    desc: Option<String>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
@@ -78,6 +81,8 @@ pub struct ProjectCard {
     pub pinned: bool,
 
     // —— 以下字段在正常解析时填充；降级卡片可能为默认值 ——
+    /// 项目一句话描述（来自 frontmatter desc，可选；缺省为空串，前端不渲染该行）
+    pub desc: String,
     pub status: String, // active | paused | done | unknown
     pub stages: Vec<String>,
     pub current_stage: i64,
@@ -232,6 +237,116 @@ pub fn extract_body(content: &str) -> String {
     trimmed.to_string()
 }
 
+// ───────────────────────── 三件套块提取（详情页用）─────────────────────────
+// App 端零智能：只做确定性的 markdown 块定位与文本截取，绝不解析语义、不调 LLM。
+// 任一块缺失 / 格式不符 → 返回空，由前端静默降级（不显示该区域），绝不崩溃。
+
+/// 提取 `## <heading>` 标题到下一个 `## ` 标题（或文件末尾）之间的正文。
+/// 返回去掉首尾空白的块内容；找不到该标题返回 None。
+pub fn extract_section(md: &str, heading: &str) -> Option<String> {
+    let target = format!("## {heading}");
+    let mut lines = md.lines();
+    // 定位标题行
+    loop {
+        let line = lines.next()?;
+        if line.trim() == target {
+            break;
+        }
+    }
+    // 收集到下一个 ## 标题为止
+    let mut buf = String::new();
+    for line in lines {
+        let t = line.trim_start();
+        if t.starts_with("## ") {
+            break;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    let s = buf.trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// 从一段文本中取首个 ```mermaid 代码块的内容（不含围栏）。无则 None。
+pub fn extract_mermaid(section: &str) -> Option<String> {
+    let mut lines = section.lines();
+    // 找开围栏 ```mermaid
+    loop {
+        let line = lines.next()?;
+        if line.trim().starts_with("```mermaid") {
+            break;
+        }
+    }
+    let mut buf = String::new();
+    for line in lines {
+        if line.trim().starts_with("```") {
+            break;
+        }
+        buf.push_str(line);
+        buf.push('\n');
+    }
+    let s = buf.trim_end().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// 解析 `## 项目阶段` 块下的 markdown checkbox 列表。
+/// 每行形如 `- [x] 名 — 描述` / `- [ ] 名`；`[x]`/`[X]`=完成。
+/// 找不到块或无合法行 → 空 vec。
+pub fn extract_stage_list(md: &str) -> Vec<StageItem> {
+    let section = match extract_section(md, "项目阶段") {
+        Some(s) => s,
+        None => return vec![],
+    };
+    let mut items = vec![];
+    for raw in section.lines() {
+        let line = raw.trim();
+        // 必须形如 - [ ] 或 - [x]
+        let rest = match line
+            .strip_prefix("- [")
+            .or_else(|| line.strip_prefix("* ["))
+        {
+            Some(r) => r,
+            None => continue,
+        };
+        // rest 形如 "x] 名 — 描述" 或 " ] 名"
+        let (mark, after) = match rest.split_once(']') {
+            Some(v) => v,
+            None => continue,
+        };
+        let done = matches!(mark.trim(), "x" | "X");
+        let text = after.trim();
+        // 名 — 描述（破折号分隔，描述可选）。支持 em dash — / 连字 - / 全角 ——
+        let (name, desc) = split_name_desc(text);
+        if name.is_empty() {
+            continue;
+        }
+        items.push(StageItem {
+            name,
+            desc,
+            done,
+        });
+    }
+    items
+}
+
+/// 把 "名 — 描述" 拆成 (名, 描述)。无分隔符则全部当名、描述空。
+fn split_name_desc(text: &str) -> (String, String) {
+    for sep in [" — ", " - ", " —— ", "—", " – "] {
+        if let Some((n, d)) = text.split_once(sep) {
+            return (n.trim().to_string(), d.trim().to_string());
+        }
+    }
+    (text.to_string(), String::new())
+}
+
 // ───────────────────────── 单项目解析 ─────────────────────────
 
 /// 解析单个 registry 条目为一张卡片。永不 panic。
@@ -249,6 +364,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
                 path: project_root.to_string_lossy().to_string(),
                 progress_path: progress_path.to_string_lossy().to_string(),
                 pinned: entry.pinned,
+                desc: c.desc,
                 status: c.status,
                 stages: c.stages,
                 current_stage: c.current_stage,
@@ -265,6 +381,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
                 path: project_root.to_string_lossy().to_string(),
                 progress_path: progress_path.to_string_lossy().to_string(),
                 pinned: entry.pinned,
+                desc: String::new(),
                 status: "unknown".into(),
                 stages: vec![],
                 current_stage: 0,
@@ -333,6 +450,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
     make_card(
         None,
         Some(FmComputed {
+            desc: fm.desc.unwrap_or_default(),
             status,
             stages: fm.stages,
             current_stage,
@@ -347,6 +465,7 @@ fn parse_entry(entry: &RegistryEntry) -> ProjectCard {
 
 // 解析成功时的中间结果
 struct FmComputed {
+    desc: String,
     status: String,
     stages: Vec<String>,
     current_stage: i64,
@@ -472,11 +591,26 @@ pub fn collect_progress_paths_from(registry_path: &Path) -> Vec<PathBuf> {
 
 /// 单项目详情：复用卡片字段 + PROGRESS.md frontmatter 之后的正文原文（markdown 由前端确定性渲染）。
 /// body 始终为原文字符串，App 端零智能、不解析正文语义。
+/// 阶段分块项（来自 CHANGELOG.md `## 项目阶段` 的 checkbox 列表）。
+#[derive(Debug, Serialize, PartialEq)]
+pub struct StageItem {
+    pub name: String,
+    pub desc: String,
+    pub done: bool,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ProjectDetail {
     pub card: ProjectCard,
-    /// frontmatter 之后的正文 markdown 原文；文件缺失 / 读失败时为空字符串（防御性）
+    /// frontmatter 之后的正文 markdown 原文；文件缺失 / 读失败时为空字符串（防御性）。
+    /// 详情页改版后前端不再渲染，保留以兼容其他潜在调用方。
     pub body: String,
+    /// INDEX.md `## 项目简介` 块纯文本；缺失为空串
+    pub intro: String,
+    /// INDEX.md `## 架构图` 下首个 mermaid 块源码；缺失为空串
+    pub arch_mermaid: String,
+    /// CHANGELOG.md `## 项目阶段` 的阶段分块列表；缺失为空 vec
+    pub stages: Vec<StageItem>,
 }
 
 /// 按 id 从指定 registry 加载单项目详情。core 实现，便于单测注入路径。
@@ -502,7 +636,24 @@ pub fn load_project_from(registry_path: &Path, project_id: &str) -> Result<Proje
         .map(|c| extract_body(&c))
         .unwrap_or_default();
 
-    Ok(ProjectDetail { card, body })
+    // 三件套块：从项目根固定文件名读取，全部防御性（读失败 / 块缺失 → 空，绝不报错）
+    let root = std::path::Path::new(&card.path);
+    let index_md = std::fs::read_to_string(root.join("INDEX.md")).unwrap_or_default();
+    let changelog_md = std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap_or_default();
+
+    let intro = extract_section(&index_md, "项目简介").unwrap_or_default();
+    let arch_mermaid = extract_section(&index_md, "架构图")
+        .and_then(|s| extract_mermaid(&s))
+        .unwrap_or_default();
+    let stages = extract_stage_list(&changelog_md);
+
+    Ok(ProjectDetail {
+        card,
+        body,
+        intro,
+        arch_mermaid,
+        stages,
+    })
 }
 
 /// 默认入口：从默认 registry 加载单项目详情。
@@ -679,6 +830,75 @@ mod tests {
         let detail = load_project_from(&regp, "noprog").unwrap();
         assert_eq!(detail.card.error.as_ref().unwrap().kind, "missing");
         assert_eq!(detail.body, ""); // 正文读取防御性，缺失时空串
+        // 三件套块缺失时也都是空（防御性降级）
+        assert_eq!(detail.intro, "");
+        assert_eq!(detail.arch_mermaid, "");
+        assert!(detail.stages.is_empty());
+    }
+
+    // ───── 三件套块提取 ─────
+    #[test]
+    fn test_extract_section_basic() {
+        let md = "# T\n\n## 项目简介\n这是一句简介。\n第二行。\n\n## 架构图\n图内容\n";
+        assert_eq!(
+            extract_section(md, "项目简介").unwrap(),
+            "这是一句简介。\n第二行。"
+        );
+        assert_eq!(extract_section(md, "架构图").unwrap(), "图内容");
+        assert!(extract_section(md, "不存在").is_none());
+    }
+
+    #[test]
+    fn test_extract_mermaid_ok_and_none() {
+        let sec = "前言\n```mermaid\nflowchart TD\n  A --> B\n```\n后语";
+        assert_eq!(extract_mermaid(sec).unwrap(), "flowchart TD\n  A --> B");
+        assert!(extract_mermaid("没有代码块").is_none());
+    }
+
+    #[test]
+    fn test_extract_stage_list_parses_checkbox() {
+        let md = "## 项目阶段\n- [x] 需求与架构 — 明确方案\n- [ ] provider 注入 — 专属 home\n- [X] 备份机制\n非列表行\n\n## 2026-06-13 #feat scope:x - 变更流水\n";
+        let items = extract_stage_list(md);
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0], StageItem { name: "需求与架构".into(), desc: "明确方案".into(), done: true });
+        assert_eq!(items[1], StageItem { name: "provider 注入".into(), desc: "专属 home".into(), done: false });
+        // 无破折号描述 → desc 空；大写 X 也算完成
+        assert_eq!(items[2], StageItem { name: "备份机制".into(), desc: "".into(), done: true });
+    }
+
+    #[test]
+    fn test_extract_stage_list_no_block_empty() {
+        // 没有「## 项目阶段」块 → 空（不误抓其他列表）
+        assert!(extract_stage_list("## 别的\n- [x] 不该被抓").is_empty());
+    }
+
+    #[test]
+    fn test_load_project_reads_trio_blocks() {
+        let tmp = unique_tmp();
+        let good = "---\nproject: voice\nstatus: active\nstages:\n  - a\ncurrent_stage: 1\nupdated: 2026-06-13\n---\n正文\n";
+        let root = make_project(&tmp, "voice", Some(good));
+        // 写 INDEX.md / CHANGELOG.md 到项目根
+        std::fs::write(
+            root.join("INDEX.md"),
+            "## 项目简介\n一句话简介。\n\n## 架构图\n```mermaid\nflowchart TD\n  A --> B\n```\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("CHANGELOG.md"),
+            "## 项目阶段\n- [x] 阶段一 — 完成了\n- [ ] 阶段二\n\n## 2026-06-13 #feat - 流水\n",
+        )
+        .unwrap();
+        let reg = format!(
+            "version: 1\nprojects:\n  - id: voice\n    name: V\n    path: {}\n",
+            root.display()
+        );
+        let regp = write_registry(&tmp, &reg);
+        let d = load_project_from(&regp, "voice").unwrap();
+        assert_eq!(d.intro, "一句话简介。");
+        assert_eq!(d.arch_mermaid, "flowchart TD\n  A --> B");
+        assert_eq!(d.stages.len(), 2);
+        assert!(d.stages[0].done);
+        assert!(!d.stages[1].done);
     }
 
     // ───── 防御性：各类坏数据 ─────

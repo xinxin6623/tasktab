@@ -1,12 +1,13 @@
-// Detail.tsx —— 项目详情页（M3）。
-// 包含：阶段垂直时间线（完成✓/当前高亮+阶段内进度/未来灰）、完整 next 列表、
-//       blocked_by 警示条、PROGRESS.md 正文 markdown 只读预览、返回导航 + 动作按钮。
-// App 端零智能：正文用确定性 markdown 库 marked 渲染，绝不调 LLM、不做网络请求。
+// Detail.tsx —— 项目详情页。
+// 改版后布局（上→下）：进度条 → blocked_by 警示 → 项目简介(INDEX) → 阶段分块列表(CHANGELOG，10 行+滚动)
+//       → 架构图(INDEX mermaid) → 动作按钮(打开 INDEX.md / VS Code) → 更新+路径。
+// 数据来自三件套：PROGRESS.md(进度/状态) + INDEX.md(简介/架构图) + CHANGELOG.md(阶段表)。
+// App 端零智能：确定性提取 + mermaid 本地渲染，绝不调 LLM、不做网络请求。
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { marked } from "marked";
 import type { ProjectDetail } from "../types";
-import { openInEditor, openProgress } from "../actions";
+import { openInEditor, openIndex, openProgress } from "../actions";
+import { Mermaid } from "./Mermaid";
 import { useToast } from "./Toast";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -15,9 +16,6 @@ const STATUS_LABEL: Record<string, string> = {
   done: "已完成",
   unknown: "未知",
 };
-
-// marked 同步渲染配置：确定性、无网络；GitHub 风格换行。
-marked.setOptions({ gfm: true, breaks: true });
 
 export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   const [detail, setDetail] = useState<ProjectDetail | null>(null);
@@ -55,6 +53,13 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       toast(`打开 PROGRESS.md 失败：${e}`);
     }
   };
+  const doOpenIndex = async () => {
+    try {
+      await openIndex(p.path);
+    } catch (e) {
+      toast(`打开 INDEX.md 失败：${e}`);
+    }
+  };
   const doOpenEditor = async () => {
     try {
       await openInEditor(p.path);
@@ -79,10 +84,6 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
   }
 
   const pct = Math.round(p.overall_progress);
-  // marked.parse 在 async:false（默认）下返回 string；这里用确定性同步渲染。
-  const bodyHtml = detail.body.trim()
-    ? (marked.parse(detail.body) as string)
-    : "";
 
   return (
     <DetailShell
@@ -90,14 +91,10 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
       title={p.name}
       badge={{ cls: p.status, text: STATUS_LABEL[p.status] ?? p.status }}
     >
-      {/* 整体进度 */}
+      {/* 进度条（仅条形，无文字行） */}
       <div className="progress detail-block">
         <div className="progress-track">
           <div className="progress-fill" style={{ width: `${pct}%` }} />
-        </div>
-        <div className="progress-meta">
-          <span>整体进度</span>
-          <span>{pct}%</span>
         </div>
       </div>
 
@@ -113,63 +110,36 @@ export function Detail({ id, onBack }: { id: string; onBack: () => void }) {
         </div>
       )}
 
-      {/* 阶段垂直时间线 */}
-      <section className="detail-block">
-        <h3 className="detail-h">阶段时间线</h3>
-        <ol className="timeline">
-          {p.stages.map((stage, i) => {
-            const idx = i + 1;
-            const isDone = idx < p.current_stage || p.status === "done";
-            const isCurrent = idx === p.current_stage && p.status !== "done";
-            const cls = isDone ? "done" : isCurrent ? "current" : "future";
-            return (
-              <li key={i} className={`tl-item ${cls}`}>
-                <span className="tl-marker">{isDone ? "✓" : idx}</span>
-                <div className="tl-body">
-                  <div className="tl-name">{stage}</div>
-                  {isCurrent && (
-                    <div className="tl-progress">
-                      <div className="progress-track sm">
-                        <div
-                          className="progress-fill"
-                          style={{ width: `${Math.round(p.stage_progress)}%` }}
-                        />
-                      </div>
-                      <span className="tl-pct">阶段内 {Math.round(p.stage_progress)}%</span>
-                    </div>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ol>
-      </section>
+      {/* 项目简介（INDEX ## 项目简介；缺失不显示） */}
+      {detail.intro && <p className="detail-intro detail-block">{detail.intro}</p>}
 
-      {/* 完整 next 列表 */}
-      {p.next.length > 0 && (
+      {/* 阶段分块列表（CHANGELOG ## 项目阶段；缺失不显示；10 行+滚动） */}
+      {detail.stages.length > 0 && (
         <section className="detail-block">
-          <h3 className="detail-h">接下来</h3>
-          <ul className="next">
-            {p.next.map((n, i) => (
-              <li key={i}>{n}</li>
+          <h3 className="detail-h">项目阶段</h3>
+          <ul className="stage-list">
+            {detail.stages.map((s, i) => (
+              <li key={i} className={`stage-row ${s.done ? "done" : ""}`}>
+                <span className="stage-mark">{s.done ? "✓" : "○"}</span>
+                <span className="stage-name">{s.name}</span>
+                {s.desc && <span className="stage-desc">{s.desc}</span>}
+              </li>
             ))}
           </ul>
         </section>
       )}
 
-      {/* PROGRESS.md 正文 markdown 只读预览 */}
-      <section className="detail-block">
-        <h3 className="detail-h">PROGRESS.md 正文</h3>
-        {bodyHtml ? (
-          <div className="md-preview" dangerouslySetInnerHTML={{ __html: bodyHtml }} />
-        ) : (
-          <div className="md-empty">（正文为空）</div>
-        )}
-      </section>
+      {/* 架构图（INDEX ## 架构图 mermaid；缺失不显示） */}
+      {detail.arch_mermaid && (
+        <section className="detail-block">
+          <h3 className="detail-h">架构图</h3>
+          <Mermaid code={detail.arch_mermaid} />
+        </section>
+      )}
 
-      {/* 元信息 + 动作按钮 */}
+      {/* 动作按钮 */}
       <div className="detail-actions">
-        <button className="btn" onClick={doOpenProgress}>打开 PROGRESS.md</button>
+        <button className="btn" onClick={doOpenIndex}>打开 INDEX.md</button>
         <button className="btn" onClick={doOpenEditor}>VS Code 打开项目</button>
       </div>
       <div className="detail-meta">

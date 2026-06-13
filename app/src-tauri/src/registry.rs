@@ -95,6 +95,7 @@ fn kebab_case(name: &str) -> String {
 /// 必须与 cra.py 的 progress_template 输出一致：PyYAML safe_dump(allow_unicode, sort_keys=False)
 /// 对该 frontmatter 的输出形如：
 /// project: <id>
+/// desc: ''
 /// status: active
 /// stages:
 /// - 需求与架构
@@ -108,7 +109,7 @@ pub fn progress_template(project_id: &str) -> String {
     // 注意：PyYAML 默认 block 序列不缩进列表项（"- foo" 与父键同列），这里逐字节复刻。
     // PyYAML 把 ISO 日期当 timestamp 并加单引号，这里逐字节对齐（updated: '2026-06-13'）。
     let fm = format!(
-        "project: {project_id}\nstatus: active\nstages:\n- 需求与架构\ncurrent_stage: 1\nstage_progress: 0\nnext: []\nblocked_by: []\nupdated: '{today}'\n"
+        "project: {project_id}\ndesc: ''\nstatus: active\nstages:\n- 需求与架构\ncurrent_stage: 1\nstage_progress: 0\nnext: []\nblocked_by: []\nupdated: '{today}'\n"
     );
     format!(
         "---\n{fm}---\n\n## 阶段记录\n\n(自由 markdown 正文,App 仅做只读预览渲染,不解析)\n"
@@ -440,7 +441,7 @@ mod tests {
     fn test_template_format_matches_cra_schema() {
         let t = progress_template("voice-pipeline");
         // 必须含 frontmatter 起止 + 02 §1.1 全部字段 + 正文标题
-        assert!(t.starts_with("---\nproject: voice-pipeline\nstatus: active\n"));
+        assert!(t.starts_with("---\nproject: voice-pipeline\ndesc: ''\nstatus: active\n"));
         assert!(t.contains("stages:\n- 需求与架构\n"));
         assert!(t.contains("current_stage: 1\n"));
         assert!(t.contains("stage_progress: 0\n"));
