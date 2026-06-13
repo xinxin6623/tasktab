@@ -1,0 +1,31 @@
+[package]
+name = "taskboard"
+version = "0.1.0"
+description = "TaskBoard - macOS 任务看板"
+authors = ["James"]
+edition = "2021"
+rust-version = "1.77"
+
+# 库 target，便于 Rust 单测直接测解析逻辑（不依赖 Tauri 运行时）
+[lib]
+name = "taskboard_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+# M3 目录选择对话框（App 内添加项目用）
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+# M4：文件监听（macOS 后端即 FSEvents）+ 500ms 去抖
+notify = "6"
+notify-debouncer-full = "0.3"
+
+[features]
+# 默认无自定义协议保护，保持脚手架默认
+default = []

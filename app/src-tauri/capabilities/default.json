@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "TaskBoard 默认权限：核心 + 打开文件/项目目录 + 目录选择对话框（M3 增删/动作按钮需要）。打开 PROGRESS.md 与 VS Code 走 Rust 侧 std::process::Command，不依赖 shell 插件。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "opener:allow-open-path",
+    "opener:allow-reveal-item-in-dir",
+    "dialog:default",
+    "dialog:allow-open"
+  ]
+}
