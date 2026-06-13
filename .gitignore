@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# 构建产物（app/.gitignore 已覆盖，这里兜底防止从根目录误加）
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/schemas/
+
+# 文档包压缩副本（冗余，不纳入版本控制）
+同步看板files/同步看板files.zip

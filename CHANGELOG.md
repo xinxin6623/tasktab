@@ -1,0 +1,84 @@
+# tasktab · CHANGELOG
+
+> 每次动了什么记一条。详细记录写在各自模块目录下，根目录 CHANGELOG 是**强标签化的检索索引**。
+>
+> **如本项目下有子项目**（子目录里也有 AGENTS/INDEX/CHANGELOG 三件套）：本 CHANGELOG **只记录跨多个子项目的同时操作**；单一子项目操作记在该子项目自己的 CHANGELOG 里。详见 [`docs/trio-protocol.md`](./docs/trio-protocol.md) §5 子项目嵌套（max-depth = 3）。
+
+## 格式规范（严格）
+
+```
+## YYYY-MM-DD #<type> scope:<name> [#<extra-tag>...] - <一句话主题>
+
+- Why: <一句话动机，不复述 what>
+- 详见: <path 或 commit hash>
+```
+
+**硬约束**：
+- 日期必须 ISO 格式 `YYYY-MM-DD`
+- 类型标签必须以 `#` 开头，从下面字典选一个为主标签
+- 作用域必须 `scope:<name>` 形式，name 用 kebab-case；多模块改动用多个 `scope:`
+- Why 一行不超过 80 字符
+- **不贴 diff、不复述 what**——那些进 commit 或模块自己的文档
+
+## 类型标签字典
+
+| 标签 | 含义 |
+|---|---|
+| `#feat` | 新功能 |
+| `#fix` | bug 修复 |
+| `#refactor` | 重构（无行为变化） |
+| `#perf` | 性能优化 |
+| `#docs` | 文档变更 |
+| `#test` | 测试相关 |
+| `#chore` | 构建/依赖/工具链/初始化 |
+| `#archive` | 归档/弃用 |
+| `#breaking` | 破坏性变更（叠加） |
+| `#deprecated` | 标记弃用（叠加） |
+| `#wip` | 进行中（叠加） |
+
+## 检索示例
+
+```bash
+grep -E "^## .* #feat .* scope:cli" CHANGELOG.md     # cli 模块新功能
+grep "#breaking" CHANGELOG.md                         # 所有破坏性变更
+grep "^## 2026-06" CHANGELOG.md                       # 2026 年 6 月所有动作
+```
+
+---
+
+## 2026-06-13 #chore scope:install - M5 install.sh 安装脚本完成
+
+- Why: 一键软链 cra、装 progress-tracker skill、构建并安装 TaskBoard.app
+- 详见: scripts/install.sh（幂等可重跑，--no-app 跳过构建；cra 端到端烟雾测试通过）
+
+## 2026-06-13 #feat scope:app - M4 FSEvents 文件监听自动刷新完成
+
+- Why: 产品核心卖点——进度文件一变看板秒刷，用户永不手动更新看板
+- 详见: app/src-tauri/src/watcher.rs（notify 监听父目录+500ms 去抖，cargo test 34 passed）
+
+## 2026-06-13 #feat scope:app - M3 详情页 + 动作按钮 + App 内增删完成
+
+- Why: 让看板可交互——查单项目时间线、开文件/编辑器、界面内登记与移除项目
+- 详见: app/（Rust 增删与 cra.py 字节一致，cargo test 28 passed）
+
+## 2026-06-13 #feat scope:app - M2 Tauri 骨架 + 只读仪表盘完成
+
+- Why: 用户第一屏，把 registry 与各 PROGRESS.md 首次以看板卡片网格呈现
+- 详见: app/（Tauri2+React/TS，load_board 防御性解析，cargo test 16 passed）
+
+## 2026-06-13 #feat scope:cli - M1 cra 命令行工具完成
+
+- Why: 看板的数据地基，负责项目登记/移除/列表与 PROGRESS.md 模板生成
+- 详见: cli/cra.py（add/remove/list + 原子 registry 写入，4 条验收全过）
+
+## 2026-06-13 #feat scope:skill - M5 progress-tracker skill 草稿落地
+
+- Why: 系统唯一的"智能"写入端，让 Claude Code 干活时自动更新 PROGRESS.md
+- 详见: skill/progress-tracker/SKILL.md（schema 已对齐 02 §1.1，修正 stage_progress 可选语义）
+
+## 2026-06-13 #chore scope:init - 项目初始化
+
+- Why: 新 TaskBoard 项目需要 agent 入口、人类导航、演绎记录三件套，便于协作和未来检索
+- 详见: AGENTS.md / INDEX.md / PROJECT_PROGRESS.md / 本文件
+
+<!-- 新条目加在这里上方，保持最新在最上 -->
