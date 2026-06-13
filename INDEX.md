@@ -4,16 +4,11 @@
 
 > 🤖 Agent 上手先读 [`AGENTS.md`](./AGENTS.md) 的操作守则（通用协议在 [`docs/trio-protocol.md`](./docs/trio-protocol.md)）；改动后记得追加 [`CHANGELOG.md`](./CHANGELOG.md)（强标签格式见文件顶部），阶段性成果同步到 [`PROJECT_PROGRESS.md`](./PROJECT_PROGRESS.md)。
 
-<!--
 ## 当前接力点 (Handoff)
 
-此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。
-详见 docs/trio-protocol.md §3。
+> 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。详见 docs/trio-protocol.md §3。
 
-模板（实际启用时去掉外层 HTML 注释）：
-
-- **YYYY-MM-DD**：一句话描述下一步要做什么；关键命令 / 文件指针；可附 `详见 obwiki <wiki page>` 指针。
--->
+- **2026-06-13**：M1–M5 代码全完成、测试稳定全过、已 push 到 GitHub、图标已换正式版。下一步全是**真机验证**（无头跑不了）：`cd app && pnpm tauri dev` 看窗口/配色/坏文件降级卡 → 改某 PROGRESS.md 的 `stage_progress` 看是否 1 秒内秒刷（M4）→ 试详情页两个打开按钮 + 界面增删（M3）→ 跑 `./scripts/install.sh` 正式安装（写 ~/bin + ~/.claude/skills + /Applications，留 James 拍板）→ 在已登记项目用 Claude Code 收尾验 progress-tracker 自动写进度（M5 端到端）。
 
 ## 项目进度
 
@@ -74,4 +69,5 @@ tasktab/
 - 📓 演绎记录：[CHANGELOG.md](./CHANGELOG.md)
 - 🤖 Agent 守则：[AGENTS.md](./AGENTS.md)
 - 📐 设计权威：[同步看板files/02-实现步骤.md](./同步看板files/02-实现步骤.md)
-<!-- 在此补充：仓库地址、部署地址、issue tracker 等 -->
+- 🌐 GitHub 远端：https://github.com/xinxin6623/tasktab （PUBLIC，main 分支）
+<!-- 在此补充：部署地址、issue tracker 等 -->
