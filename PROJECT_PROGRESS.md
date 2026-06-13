@@ -93,7 +93,7 @@
 4. **正式安装**：确认无误后跑 `./scripts/install.sh` 一键安装（注意：这会写入 `~/bin`、`~/.claude/skills/` 并把 .app 装进「应用程序」——我没有擅自执行，留给你拍板）。
 5. **M5 端到端终验**：在一个已登记项目里用 Claude Code 干个小任务并收尾，确认 progress-tracker 自动更新了进度文件、看板自动反映。
 
-**待办收尾项**：~~图标占位~~ ✅ 已换成正式图标（青绿磨砂玻璃圆角方 + 任务清单打勾，从 James 提供的 macOS 风格 Logo 裁切抠图、去文字与水印），全套尺寸 + .icns/.ico 已生成，dev 窗口已生效。原始 Logo 图保留在项目根 `TaskTab应用macOS风格Logo设计.png`。
+**待办收尾项**：~~图标占位~~ ✅ 已换成正式图标（青绿磨砂玻璃圆角方 + 任务清单 + 对勾）。以 James 提供的 macOS 风格 Logo 为参考、用 Pillow 矢量重画干净版（无 AI 压缩伪影），全套尺寸 + .icns/.ico 已生成，dev 窗口已生效。参考 Logo 保留在项目根 `TaskTab应用macOS风格Logo设计.png`；历史裁切版图标备份在 `archive/icons/`。
 
 ## 风险与注意
 
