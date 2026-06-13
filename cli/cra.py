@@ -9,9 +9,9 @@
 """cra —— TaskBoard 项目登记 CLI。
 
 子命令:
-  cra add <path> [--name NAME]   登记项目;无 PROGRESS.md 则按 02 §1.1 生成模板
+  cra add <path> [--name NAME]   登记项目进 registry(不生成任何文件;看板字段从三件套读)
   cra remove <id>                从 registry 移除登记(不动项目文件)
-  cra list                       表格输出所有项目及整体进度百分比
+  cra list                       表格输出所有项目及整体进度(进度从 CHANGELOG 项目阶段算)
 
 数据契约权威来源:同步看板files/02-实现步骤.md §1.1 / §1.2,逐字段对齐。
 """
@@ -143,7 +143,7 @@ def cli():
 @click.argument("path")
 @click.option("--name", default=None, help="看板显示名(缺省取目录名)")
 def add(path: str, name: str | None):
-    """登记项目;无 PROGRESS.md 则生成模板,写入 registry。"""
+    """登记项目进 registry(原子写)。不生成任何文件——看板字段从三件套读。"""
     proj_dir = Path(path).expanduser().resolve()
     # 校验路径
     if not proj_dir.exists():

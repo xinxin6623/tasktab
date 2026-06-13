@@ -1,6 +1,8 @@
 ---
 trio: standard-v2
 trio-initialized: 2026-06-13
+status: active
+desc: macOS 桌面任务看板，文件即真相
 ---
 
 # tasktab · Agent 操作守则

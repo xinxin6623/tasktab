@@ -8,7 +8,22 @@
 
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。详见 docs/trio-protocol.md §3。
 
-- **2026-06-13**：M1–M5 代码全完成、测试稳定全过、已 push 到 GitHub、图标已换正式版。下一步全是**真机验证**（无头跑不了）：`cd app && pnpm tauri dev` 看窗口/配色/坏文件降级卡 → 改某 PROGRESS.md 的 `stage_progress` 看是否 1 秒内秒刷（M4）→ 试详情页两个打开按钮 + 界面增删（M3）→ 跑 `./scripts/install.sh` 正式安装（写 ~/bin + ~/.claude/skills + /Applications，留 James 拍板）→ 在已登记项目用 Claude Code 收尾验 progress-tracker 自动写进度（M5 端到端）。
+- **2026-06-14**：架构已收敛到三件套（PROGRESS.md + /kanban 退役），App 改读三件套并真机验证通过（cc-switch + tasktab 自身都已发布到看板）。⚠ 阻塞：AGENTS.md/CLAUDE.md 项目宪法仍是旧版（通篇讲 PROGRESS.md/progress-tracker），下一步需按新架构重写宪法 + 跑 `./scripts/install.sh` 正式打包发布。
+
+## 项目简介
+
+一个 macOS 桌面任务看板，把所有项目进度集中一屏。每个项目用三件套维护自己的进度，TaskBoard 用 FSEvents 监听文件变化秒级刷新——看板零智能、文件是唯一真相。
+
+## 架构图
+
+```mermaid
+flowchart TD
+  A[各项目三件套<br/>AGENTS/INDEX/CHANGELOG] --> B[registry.yaml 名单]
+  B --> C[Rust 后端确定性解析]
+  C --> D[前端卡片+详情页渲染]
+  E[FSEvents 监听] -.文件变.-> C
+  F[outkanban/wrap-up 写入端] --> A
+```
 
 ## 项目进度
 
