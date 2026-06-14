@@ -341,26 +341,41 @@ fn compute_progress_from_stages(stages: &[StageItem], status: &str) -> f64 {
 }
 
 /// 从 INDEX.md `## 当前接力点 (Handoff)` 区解析 next 与 blocked_by。
-/// 约定：列表行 `- xxx` 为 next；以 `⚠` 或 `阻塞` 开头的行归 blocked_by。
-/// 区缺失 / 为空 / 整段是 HTML 注释占位 → 两个都空（防御性）。
+/// Handoff 段拆为 `### 概述` / `### 明细` 两个子段：**App 只读「概述」段**，
+/// 明细段是给人/agent 看的长说明，App 完全不碰。
+/// 约定：概述段内每个非空内容行即一条接力项；以 `⚠` 或 `阻塞` 开头的归 blocked_by，
+/// 其余归 next。列表前缀 `- `/`* ` 可选（有就剥掉），首尾 `**` 加粗标记一并剥掉——
+/// 概述推荐写法是「纯文本加粗行」（`**下一步**`），旧的 `- xxx` 列表行也兼容。
+/// 向后兼容：若整段没有 `### 概述` 子标题，则把第一个 `### ` 之前的内容（无子标题
+/// 时即整段）当作概述解析——兼容旧的单段 Handoff 写法。
+/// 区缺失 / 为空 / 整段是 HTML 注释占位 / 引用行 `>` → 跳过（防御性）。
 fn extract_handoff(index_md: &str) -> (Vec<String>, Vec<String>) {
     // 标题字面可能带 "(Handoff)" 后缀，宽松匹配 "## 当前接力点"
     let section = match extract_section_prefix(index_md, "当前接力点") {
         Some(s) => s,
         None => return (vec![], vec![]),
     };
+    let overview = extract_handoff_overview(&section);
     let mut next = vec![];
     let mut blocked = vec![];
-    for raw in section.lines() {
+    for raw in overview.lines() {
         let line = raw.trim();
-        // 跳过 HTML 注释占位
-        if line.starts_with("<!--") || line.starts_with("-->") || line.is_empty() {
+        // 跳过 HTML 注释占位与引用行（说明文字，非接力项）
+        if line.starts_with("<!--") || line.starts_with("-->") || line.starts_with('>') || line.is_empty() {
             continue;
         }
-        let item = match line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
-            Some(s) => s.trim(),
-            None => continue,
-        };
+        // 列表前缀可选；再剥掉首尾加粗标记
+        let item = line
+            .strip_prefix("- ")
+            .or_else(|| line.strip_prefix("* "))
+            .unwrap_or(line)
+            .trim()
+            .trim_start_matches("**")
+            .trim_end_matches("**")
+            .trim();
+        if item.is_empty() {
+            continue;
+        }
         if item.starts_with('⚠') || item.starts_with("阻塞") {
             // 去掉前缀符号与「阻塞：」标记
             let b = item
@@ -377,6 +392,37 @@ fn extract_handoff(index_md: &str) -> (Vec<String>, Vec<String>) {
         }
     }
     (next, blocked)
+}
+
+/// 从 Handoff 整段里切出「概述」子段供 App 解析。
+/// - 有 `### 概述` 子标题：返回它到下一个 `### ` 之间的内容（明细被丢弃）。
+/// - 无 `### 概述`：返回第一个 `### ` 之前的内容（兼容旧单段写法；无任何子标题则即整段）。
+fn extract_handoff_overview(section: &str) -> String {
+    let is_sub_heading = |l: &str| l.trim_start().starts_with("### ");
+    // 宽松匹配「### 概述」（容忍标题后缀）
+    let is_overview_heading =
+        |l: &str| is_sub_heading(l) && l.trim_start().trim_start_matches('#').trim_start().starts_with("概述");
+    let has_overview = section.lines().any(is_overview_heading);
+
+    let mut in_overview = false;
+    let mut collected = vec![];
+    for line in section.lines() {
+        if is_sub_heading(line) {
+            // 有显式概述段：只在概述子段内收集；明细等其他 ### 一律跳出概述
+            in_overview = is_overview_heading(line);
+            continue; // 子标题本身不收集
+        }
+        // 有概述段时只收集概述内的行；无概述段时（旧写法）收集第一个 ### 之前的行，
+        // 此处不会到达 ### 后的行——上面的 is_sub_heading 分支已处理并将 in_overview 置 false。
+        if has_overview {
+            if in_overview {
+                collected.push(line);
+            }
+        } else {
+            collected.push(line);
+        }
+    }
+    collected.join("\n")
 }
 
 /// extract_section 的宽松版：标题以 `## <prefix>` 开头即匹配（容忍标题后缀）。
@@ -965,6 +1011,7 @@ mod tests {
 
     #[test]
     fn test_extract_handoff_next_and_blocked() {
+        // 旧单段写法（无 ### 概述/明细 子标题）→ 向后兼容，整段当概述
         let idx = "# T\n\n## 当前接力点 (Handoff)\n- 写集成测试\n- ⚠ 阻塞：等待上游接口\n- 打包发布\n\n## 项目定位\nxxx";
         let (next, blocked) = extract_handoff(idx);
         assert_eq!(next, vec!["写集成测试".to_string(), "打包发布".to_string()]);
@@ -972,6 +1019,32 @@ mod tests {
         // 区缺失 → 都空
         let (n2, b2) = extract_handoff("# 无 handoff");
         assert!(n2.is_empty() && b2.is_empty());
+    }
+
+    #[test]
+    fn test_extract_handoff_overview_only_明细_ignored() {
+        // 新两段写法：App 只取「概述」段的列表，「明细」段整段被忽略
+        let idx = "# T\n\n## 当前接力点 (Handoff)\n\n### 概述\n- 打包发布\n- ⚠ 阻塞：等待签名证书\n\n### 明细\n跑 ./scripts/install.sh 构建 .app。\n- 这行明细里的列表项不该被当成 next\n- ⚠ 这行也不该进 blocked_by\n\n## 项目定位\nxxx";
+        let (next, blocked) = extract_handoff(idx);
+        assert_eq!(next, vec!["打包发布".to_string()]);
+        assert_eq!(blocked, vec!["等待签名证书".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_handoff_明细_before_概述_still_isolated() {
+        // 明细在前、概述在后：仍只取概述段
+        let idx = "## 当前接力点 (Handoff)\n\n### 明细\n- 假 next\n\n### 概述\n- 真 next\n";
+        let (next, _) = extract_handoff(idx);
+        assert_eq!(next, vec!["真 next".to_string()]);
+    }
+
+    #[test]
+    fn test_extract_handoff_纯文本加粗_无列表点() {
+        // 新推荐写法：概述是纯文本加粗行（无 - 前缀），引用行被跳过
+        let idx = "## 当前接力点 (Handoff)\n\n> 只保留最新一条。\n\n### 概述\n**跑 ./scripts/install.sh 正式打包发布**\n**⚠ 阻塞：等待签名证书**\n\n### 明细\n背景说明若干。\n";
+        let (next, blocked) = extract_handoff(idx);
+        assert_eq!(next, vec!["跑 ./scripts/install.sh 正式打包发布".to_string()]);
+        assert_eq!(blocked, vec!["等待签名证书".to_string()]);
     }
 
     #[test]
@@ -1137,3 +1210,4 @@ mod tests {
         assert_eq!(expand_tilde_with("~/x", None), PathBuf::from("~/x"));
     }
 }
+

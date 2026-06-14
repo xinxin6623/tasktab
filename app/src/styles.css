@@ -166,6 +166,7 @@ body {
 /* 项目一句话描述：最多两行，超出省略号 */
 .card-desc {
   font-size: 13px;
+  font-weight: 600;
   color: var(--text);
   line-height: 1.4;
   display: -webkit-box;
@@ -174,10 +175,11 @@ body {
   overflow: hidden;
 }
 
-/* next 列表 */
+/* next 列表：去掉项目符号圆点，纯文本左对齐 */
 .next {
   margin: 0;
-  padding-left: 16px;
+  padding-left: 0;
+  list-style: none;
   font-size: 13px;
   color: var(--text);
 }

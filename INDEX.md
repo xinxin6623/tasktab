@@ -6,9 +6,13 @@
 
 ## 当前接力点 (Handoff)
 
-> 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。详见 docs/trio-protocol.md §3。
+> 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
-- **2026-06-14**：架构已收敛到三件套（PROGRESS.md + /kanban 退役），App 改读三件套并真机验证通过（cc-switch + tasktab 自身都已发布到看板），项目宪法 AGENTS.md 已按新架构重写。下一步：跑 `./scripts/install.sh` 正式打包发布（.app 构建 + 装「应用程序」，留 James 拍板）。
+### 概述
+**跑 `./scripts/install.sh` 正式打包发布（.app 构建 + 装「应用程序」，留 James 拍板）**
+
+### 明细
+**2026-06-14**：架构已收敛到三件套（PROGRESS.md + /kanban 退役），App 改读三件套并真机验证通过（cc-switch + tasktab 自身都已发布到看板），项目宪法 AGENTS.md 已按新架构重写。Handoff 同日改为「概述/明细」两段制——App 只解析 `### 概述`，解析器见 `app/src-tauri/src/board.rs` `extract_handoff_overview`。
 
 ## 项目简介
 
