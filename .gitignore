@@ -12,3 +12,7 @@ app/src-tauri/gen/schemas/
 
 # 本地 dev 运行态（dev-detached.sh 的 PID/日志）
 .dev/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
