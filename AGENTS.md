@@ -1,6 +1,7 @@
 ---
-trio: standard-v2
+trio: standard-v3
 trio-initialized: 2026-06-13
+trio-migrated-v3: 2026-06-14
 status: active
 desc: macOS 桌面任务看板，文件即真相
 ---
@@ -11,7 +12,7 @@ desc: macOS 桌面任务看板，文件即真相
 >
 > **通用三件套协议**见 [`docs/trio-protocol.md`](./docs/trio-protocol.md)（文档维护节奏 / Handoff 写入 / 子项目嵌套 / 记忆三条线边界 / 语言规则 / 跨项目反例）。**本文件只列本项目专属守则**。
 >
-> **`trio: standard-v2`** = 本项目按当前标准维护三件套。其他 agent / skill 可通过本行 frontmatter 判断是否按标准流程处理本项目。
+> **`trio: standard-v3`** = 本项目按当前标准维护三件套。其他 agent / skill 可通过本行 frontmatter 判断是否按标准流程处理本项目。
 
 ## 这是什么项目
 
@@ -29,6 +30,8 @@ desc: macOS 桌面任务看板，文件即真相
 
 ### 看板数据契约（App 从三件套读，权威：02 §1.1b）
 
+> 下表为**派生速查**，字段 schema 唯一权威 = `同步看板files/02-实现步骤.md` §1.1b；与本表冲突一律以 §1.1b 为准。写入端 outkanban 的字段映射也派生自同一处。
+
 | 字段 | 来源 |
 |---|---|
 | status（active/paused/done）、desc（卡片一句话） | `AGENTS.md` frontmatter |
@@ -39,19 +42,14 @@ desc: macOS 桌面任务看板，文件即真相
 
 ## 上手三步
 
-1. 读 [`INDEX.md`](./INDEX.md)，看项目结构和子模块导航。
-2. 读 [`PROJECT_PROGRESS.md`](./PROJECT_PROGRESS.md)，看非工程视角的当前阶段、已完成、下一步和风险。
-3. **动手前先读 `同步看板files/02-实现步骤.md`**：执行计划主文档，含数据契约（**§1.1b 唯一权威**；§1.1 已标废弃）、技术栈、里程碑。M1–M5 已全部完成、架构已收敛到三件套，现处于真机终验 + 打包发布阶段。
+1. 读 [`INDEX.md`](./INDEX.md)，看项目结构、子模块导航、当前接力点和「上手 & 运行」。
+2. **动手前先读 `同步看板files/02-实现步骤.md`**：执行计划主文档，含数据契约（**§1.1b 唯一权威**；§1.1 已标废弃）、技术栈、里程碑。M1–M5 已全部完成、架构已收敛到三件套，现处于真机终验 + 打包发布阶段。
 
 ## 项目进度同步
 
-[`PROJECT_PROGRESS.md`](./PROJECT_PROGRESS.md) 是给不懂代码工程的人看的项目进度页，和 `CHANGELOG.md` 分工不同：
-
-- `PROJECT_PROGRESS.md` 写"现在到哪了 / 做完什么 / 下一步是什么 / 用户怎么验收"，用普通中文，不堆代码术语。
-- `CHANGELOG.md` 写给未来 agent 检索的强标签记录，保持短、结构化。
-- 每完成一个里程碑或可验收小任务，必须同步 `PROJECT_PROGRESS.md` 的"已完成 / 下一步 / 验收方式 / 风险变化"。
-- 阶段同步说明要解释"这一步对产品进度意味着什么"，不要只列文件名、命令或内部实现。
-- 最终回复用户时要说明 `PROJECT_PROGRESS.md` 是否已同步；如果没同步，必须说明原因。
+> ⚠️ **本项目已于 2026-06-14 退役 `PROJECT_PROGRESS.md`**（James 拍板）。本项目进度只走 `CHANGELOG.md`（强标签记录）+ `INDEX.md` 的「当前接力点 (Handoff)」，**不再维护、不再要求同步 PROJECT_PROGRESS.md，最终回复也无需再说明它是否同步**。
+>
+> 这条**显式覆盖** `docs/trio-protocol.md` 里"每阶段更新 PROJECT_PROGRESS.md"的通用节奏——通用协议对其他项目仍生效，本项目不适用。老文件留在根目录仅作历史快照，勿再写入。
 
 ## 项目专属硬规则
 
@@ -80,7 +78,7 @@ desc: macOS 桌面任务看板，文件即真相
 | `scripts/` | `install.sh`（软链 cra、安装 skill、构建装 .app） |
 | `docs/` | 详细文档；**本项目根持有** `trio-protocol.md`；指导文档包按 02 §2 最终归档于此 |
 | `同步看板files/` | 三份指导文档（产品意图 / 实现步骤 / skill 规则），当前的设计权威来源 |
-| `PROJECT_PROGRESS.md` | 给非工程读者看的项目阶段进度和下一步 |
+| `PROJECT_PROGRESS.md` | ⚠️ 已退役（2026-06-14），仅历史快照，勿写入；进度走 CHANGELOG + INDEX Handoff |
 
 > 写入端 skill（outkanban / wrap-up）的源住在 `~/Documents/myskills`，不在本仓——本仓只是它们维护的"消费方"。退役的 kanban skill 归档在 `archive/kanban-retired/`。
 
