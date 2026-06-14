@@ -35,6 +35,7 @@
 **2026-06-14**：① 开发期启停脚本就位（dev-detached / dev-stop，App 脱离 VSCode 常驻）。② PROJECT_PROGRESS 退役已升格为协议层 standard-v3，tasktab 升 v3（吸收器机制见 myskills/project-init/references/migrations.md）。
 
 两个待清尾巴（不阻塞开发，定稿前处理）：
+
 - `scripts/install.sh` 第 19/59-65 行仍装已退役的 progress-tracker skill，正式打包前清掉。
 - App 端验收：dev 模式真机点开看板确认各项目卡片正常（cc-switch + tasktab 已发布）。
 
@@ -60,7 +61,7 @@ flowchart TD
 
 ## 项目结构
 
-```
+```text
 tasktab/
 ├── 同步看板files/        # 三份指导文档（设计权威来源，最终归档到 docs/）
 │   ├── 00-README.md          # 文档包入口与冲突裁决规则
@@ -84,7 +85,7 @@ tasktab/
 ## 子模块导航
 
 | 路径 | 说明 | 状态 |
-|---|---|---|
+| --- | --- | --- |
 | `同步看板files/` | 三份指导文档：产品意图 + 实现步骤 + skill 规则 | 已有（设计权威） |
 | `docs/` | 通用三件套协议 `trio-protocol.md` | 已建 |
 | `cli/` | `cra` CLI（M1 交付） | ✅ 已完成 |
@@ -118,5 +119,5 @@ tasktab/
 - 📓 演绎记录 / 进度：[CHANGELOG.md](./CHANGELOG.md)
 - 🤖 Agent 守则：[AGENTS.md](./AGENTS.md)
 - 📐 设计权威：[同步看板files/02-实现步骤.md](./同步看板files/02-实现步骤.md)
-- 🌐 GitHub 远端：https://github.com/xinxin6623/tasktab （PUBLIC，main 分支）
+- 🌐 GitHub 远端：<https://github.com/xinxin6623/tasktab> （PUBLIC，main 分支）
 <!-- 在此补充：部署地址、issue tracker 等 -->
