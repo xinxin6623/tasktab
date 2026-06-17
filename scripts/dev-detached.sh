@@ -35,12 +35,18 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
-command -v pnpm >/dev/null 2>&1 || { warn "未检测到 pnpm"; exit 1; }
+# nohup 起的是非登录 shell，~/.cargo/bin 通常不在 PATH，tauri 会找不到 cargo
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+case ":$PATH:" in *":$HOME/.cargo/bin:"*) ;; *) PATH="$HOME/.cargo/bin:$PATH" ;; esac
+export PATH
+
+command -v npm   >/dev/null 2>&1 || { warn "未检测到 npm"; exit 1; }
+command -v cargo >/dev/null 2>&1 || { warn "未检测到 cargo（Rust 工具链不在 PATH）"; exit 1; }
 
 log "独立启动 TaskBoard dev（脱离当前终端，关 VSCode 不影响）"
 # nohup + 重定向 + & 让进程脱离终端会话；disown 进一步从作业表摘除
 cd "$APP_DIR"
-nohup pnpm tauri dev > "$LOG_FILE" 2>&1 &
+nohup npm run tauri dev > "$LOG_FILE" 2>&1 &
 NEW_PID="$!"
 echo "${NEW_PID}" > "$PID_FILE"
 

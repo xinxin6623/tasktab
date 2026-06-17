@@ -34,9 +34,8 @@
 ### 明细
 **2026-06-14**：① 开发期启停脚本就位（dev-detached / dev-stop，App 脱离 VSCode 常驻）。② PROJECT_PROGRESS 退役已升格为协议层 standard-v3，tasktab 升 v3（吸收器机制见 myskills/project-init/references/migrations.md）。
 
-两个待清尾巴（不阻塞开发，定稿前处理）：
+一个待清尾巴（不阻塞开发，定稿前处理）：
 
-- `scripts/install.sh` 第 19/59-65 行仍装已退役的 progress-tracker skill，正式打包前清掉。
 - App 端验收：dev 模式真机点开看板确认各项目卡片正常（cc-switch + tasktab 已发布）。
 
 ## 项目简介
