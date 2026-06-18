@@ -29,15 +29,20 @@
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
 ### 概述
-**继续 v1.0 开发（边用边改，用 `./scripts/dev-detached.sh` 起独立看板）；v1.0 定稿后再走 install.sh 正式打包**
+**「设备间同步」代码就位（四端全绿）—— 待 ① 真机点开桌面 App 看同步徽章 ② 服务器重新部署注入 TB_REGISTRY/TB_GH_TOKEN 切到聚合模式**
 
 ### 明细
-**2026-06-14**：① 开发期启停脚本就位（dev-detached / dev-stop，App 脱离 VSCode 常驻）。② PROJECT_PROGRESS 退役已升格为协议层 standard-v3，tasktab 升 v3（吸收器机制见 myskills/project-init/references/migrations.md）。
+**2026-06-18**：「设备间同步」改造完成。架构从「App 推送」反转为「GitHub 单一真相 → 服务器聚合 → 各端只读」，两台设备各自 push 到 GitHub 即同步看板。代码四端全绿、本地真实聚合已验证，剩两个需真机/服务器的收尾：
 
-两个待清尾巴（不阻塞开发，定稿前处理）：
+- 服务端 `server/`：`github.go`（GitHub API 拉各 repo 三件套+commit，并发，7 repo ~3s）+ `parse.go`（Go 重写解析，逐函数对齐 `board.rs`，`parse_test.go` 同源断言）+ `main.go` 聚合循环（`TB_REGISTRY` 启用）。board.json 新增 `commit`/`generated_at`。
+- App 端：`push.rs` 退役（→ `archive/push-retired/`），新增 `sync.rs`（只读 git 状态 + 只读拉 board.json）。前端 `sync.ts` 算同步徽章（已同步/待推送/待拉取/未提交/分叉），卡片显示徽章、顶栏显示服务器聚合时间。「App 端零网络」收敛为「仅两个受控只读例外」。
+- registry 加 `github` 字段（owner/repo@branch），`cra` + App 内 add 都自动探测 git remote 填充。
 
-- `scripts/install.sh` 第 19/59-65 行仍装已退役的 progress-tracker skill，正式打包前清掉。
-- App 端验收：dev 模式真机点开看板确认各项目卡片正常（cc-switch + tasktab 已发布）。
+**待办**（两个，需真机/服务器，不阻塞代码）：
+1. 真机：`./scripts/dev-detached.sh` 起桌面 App（先在 `.dev/push.env` 填 `TB_BOARD_URL`），点开看同步徽章是否正确。
+2. 服务器：重新部署 `server/`，给 swarm service 注入 `TB_REGISTRY`（GitHub 坐标）+ `TB_GH_TOKEN`（PAT，走 secret）+ `TB_POLL_SEC`，切到聚合模式（外向操作，需先确认）。
+
+旧尾巴（不阻塞）：`scripts/install.sh` 仍装已退役 progress-tracker，打包前清掉；install.sh 正式打包路径需注入 `TB_BOARD_URL`。
 
 ## 项目简介
 
@@ -74,6 +79,7 @@ tasktab/
 ├── CHANGELOG.md          # 强标签演绎记录
 ├── PROJECT_PROGRESS.md   # ⚠️ 已退役，仅历史快照
 ├── app/                  # Tauri 2（src/ 前端 + src-tauri/ Rust 后端）— M2–M4
+├── server/               # 手机查看：看板镜像服务端（Go 标准库）+ web/ 只读网页
 ├── cli/cra.py            # 登记 CLI（Python）— M1
 ├── scripts/
 │   ├── dev-detached.sh   # ▶ 开发期独立启动（脱离 VSCode）
@@ -90,6 +96,7 @@ tasktab/
 | `docs/` | 通用三件套协议 `trio-protocol.md` | 已建 |
 | `cli/` | `cra` CLI（M1 交付） | ✅ 已完成 |
 | `app/` | Tauri 2 桌面应用（M2–M4 交付） | ✅ 已完成（待真机终验） |
+| `server/` | 手机查看：看板镜像服务端 + 只读网页 | 🚧 代码就位，待部署 ECS |
 | `scripts/` | `dev-detached.sh` / `dev-stop.sh` 开发期启停 + `install.sh` 打包 | ✅ 已完成 |
 
 ## 常用操作

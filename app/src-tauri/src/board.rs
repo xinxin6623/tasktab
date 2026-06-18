@@ -425,6 +425,35 @@ fn extract_handoff_overview(section: &str) -> String {
     collected.join("\n")
 }
 
+/// 从 Handoff 整段里切出「明细」子段的原文 markdown，供「手机查看」详情页展示。
+/// 桌面 App 不渲染明细（只读概述），但手机镜像页要把明细也展示给人看。
+/// - 有 `### 明细` 子标题：返回它到下一个 `### ` 之间的内容原文。
+/// - 无 `### 明细`：返回空串（旧单段写法没有独立明细）。
+/// 防御性：纯字符串切分，块缺失即空串，绝不报错。
+fn extract_handoff_detail(index_md: &str) -> String {
+    let section = match extract_section_prefix(index_md, "当前接力点") {
+        Some(s) => s,
+        None => return String::new(),
+    };
+    let is_sub_heading = |l: &str| l.trim_start().starts_with("### ");
+    let is_detail_heading = |l: &str| {
+        is_sub_heading(l)
+            && l.trim_start().trim_start_matches('#').trim_start().starts_with("明细")
+    };
+    let mut in_detail = false;
+    let mut collected: Vec<&str> = vec![];
+    for line in section.lines() {
+        if is_sub_heading(line) {
+            in_detail = is_detail_heading(line);
+            continue; // 子标题本身不收集
+        }
+        if in_detail {
+            collected.push(line);
+        }
+    }
+    collected.join("\n").trim().to_string()
+}
+
 /// extract_section 的宽松版：标题以 `## <prefix>` 开头即匹配（容忍标题后缀）。
 fn extract_section_prefix(md: &str, prefix: &str) -> Option<String> {
     let target = format!("## {prefix}");
@@ -700,6 +729,28 @@ pub fn collect_watched_files_from(registry_path: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// 返回 registry 里每个项目的 (id, path 原文)，供 sync.rs 采集本地 git 状态。
+/// 防御性：registry 缺失/损坏 → 空列表（不报错）。path 保留原文（含未展开的 ~），调用方自行展开。
+pub fn registry_entries() -> Vec<(String, String)> {
+    registry_entries_from(&default_registry_path())
+}
+
+fn registry_entries_from(registry_path: &Path) -> Vec<(String, String)> {
+    let raw = match std::fs::read_to_string(registry_path) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    let registry: Registry = match serde_yaml::from_str(&raw) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    registry
+        .projects
+        .iter()
+        .map(|e| (e.id.clone(), e.path.clone()))
+        .collect()
+}
+
 // ───────────────────────── 详情页：load_project（M3）─────────────────────────
 
 /// 单项目详情：复用卡片字段 + PROGRESS.md frontmatter 之后的正文原文（markdown 由前端确定性渲染）。
@@ -772,6 +823,77 @@ pub fn load_project_from(registry_path: &Path, project_id: &str) -> Result<Proje
 /// 默认入口：从默认 registry 加载单项目详情。
 pub fn load_project(project_id: &str) -> Result<ProjectDetail, String> {
     load_project_from(&default_registry_path(), project_id)
+}
+
+// ───────────────────────── 「手机查看」：带详情的推送快照（push.rs 退役后不再调用）─────────────────────────
+//
+// ⚠️ 退役说明（2026-06-18）：下面的 PushBoard / load_push_board 系列原供已退役的 push.rs 用
+// （App 单向推 board.json 到服务器）。「设备间同步」方案改为服务器自己从 GitHub 聚合，App 不再推。
+// 这些结构暂保留（与服务器 Go 输出 schema 同源，留作参考 / 未来本地导出可能复用），标 allow 消警。
+//
+// 中文说明：桌面前端走 load_board（卡片级）+ 点开时 load_project（详情）两段式，
+// 详情是按需拉的。但手机镜像页没有 Tauri command 可调，所以推送时一次性把每个项目的
+// 详情（简介 / 架构图 mermaid / 阶段表 / 接力点明细）也打包进 board.json，
+// 手机端点卡片直接展开、零额外请求。本结构仅用于推送（push.rs），不影响桌面端 Board。
+
+/// 推送快照里的单项目：卡片所有字段 + 详情块。serde flatten 让卡片字段平铺，
+/// 手机端网页字段名与桌面 ProjectCard 完全一致，额外多出 intro/arch_mermaid/stages/handoff_detail。
+#[derive(Debug, Serialize)]
+pub struct PushProject {
+    #[serde(flatten)]
+    pub card: ProjectCard,
+    /// INDEX `## 项目简介`，缺失空串
+    pub intro: String,
+    /// INDEX `## 架构图` 首个 mermaid 源码，缺失空串
+    pub arch_mermaid: String,
+    /// CHANGELOG `## 项目阶段` 阶段表，缺失空 vec
+    pub stages: Vec<StageItem>,
+    /// INDEX Handoff `### 明细` 原文 markdown，缺失空串
+    pub handoff_detail: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PushBoard {
+    pub projects: Vec<PushProject>,
+    pub summary: Summary,
+    pub registry_error: Option<String>,
+}
+
+/// 组装带详情的推送快照。复用 load_board 的卡片解析 + 每项目的详情提取，全程防御性
+/// （文件/块缺失 → 字段取空，绝不报错），与零智能/零崩溃约束一致。
+#[allow(dead_code)]
+pub fn load_push_board_from(registry_path: &Path) -> PushBoard {
+    let board = load_board_from(registry_path);
+    let projects = board
+        .projects
+        .into_iter()
+        .map(|card| {
+            // 详情块：从项目根三件套读取，全部防御性（读失败/块缺失 → 空）。
+            // 降级卡片（error 非 None）也走这里：文件多半缺失，详情自然为空，手机端只显示降级提示。
+            let root = std::path::Path::new(&card.path);
+            let index_md = std::fs::read_to_string(root.join("INDEX.md")).unwrap_or_default();
+            let changelog_md =
+                std::fs::read_to_string(root.join("CHANGELOG.md")).unwrap_or_default();
+            let intro = extract_section(&index_md, "项目简介").unwrap_or_default();
+            let arch_mermaid = extract_section(&index_md, "架构图")
+                .and_then(|s| extract_mermaid(&s))
+                .unwrap_or_default();
+            let stages = extract_stage_list(&changelog_md);
+            let handoff_detail = extract_handoff_detail(&index_md);
+            PushProject { card, intro, arch_mermaid, stages, handoff_detail }
+        })
+        .collect();
+    PushBoard {
+        projects,
+        summary: board.summary,
+        registry_error: board.registry_error,
+    }
+}
+
+/// 默认入口：组装带详情的推送快照（push.rs 退役后不再调用，保留作参考）。
+#[allow(dead_code)]
+pub fn load_push_board() -> PushBoard {
+    load_push_board_from(&default_registry_path())
 }
 
 // ═════════════════════════ 单元测试 ═════════════════════════

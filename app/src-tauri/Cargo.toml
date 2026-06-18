@@ -25,6 +25,10 @@ serde_yaml = "0.9"
 # M4：文件监听（macOS 后端即 FSEvents）+ 500ms 去抖
 notify = "6"
 notify-debouncer-full = "0.3"
+# 「设备间同步」：App 只读拉取自有服务器的聚合看板 board.json（sync.rs），
+# 用来与本地 git HEAD 比对算同步徽章。选 ureq：轻量、阻塞式、纯 Rust，跑后台线程，
+# 不拖入 tokio。这是 App 端「零网络」铁律的受控例外，仅【只读拉取】、由 TB_BOARD_URL 开关。
+ureq = { version = "2", features = ["tls", "json"] }
 
 [features]
 # 默认无自定义协议保护，保持脚手架默认

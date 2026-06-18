@@ -1,0 +1,33 @@
+# Traefik 动态路由：kanban.alphaxbot.xyz → tasktab-board swarm service
+# 部署位置：/etc/dokploy/traefik/dynamic/tasktab-kanban.yml
+# Traefik 自动 reload，不用重启。仿 website.yml 写法。
+#
+# 路由规则：
+#   - HTTP 80  → 强制跳 HTTPS（复用 redirect-to-https middleware）
+#   - HTTPS 443 (kanban.alphaxbot.xyz) → 转发到 tasktab-board:8787
+#   - 证书自动用 letsencrypt resolver 申请（需先在 DNS 加 kanban A 记录）
+
+http:
+  routers:
+    tasktab-kanban-web:
+      rule: Host(`kanban.alphaxbot.xyz`)
+      service: tasktab-kanban-service
+      entryPoints:
+        - web
+      middlewares:
+        - redirect-to-https
+
+    tasktab-kanban-websecure:
+      rule: Host(`kanban.alphaxbot.xyz`)
+      service: tasktab-kanban-service
+      entryPoints:
+        - websecure
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    tasktab-kanban-service:
+      loadBalancer:
+        servers:
+          - url: http://tasktab-board:8787
+        passHostHeader: true

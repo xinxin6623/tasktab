@@ -18,6 +18,7 @@
 
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from datetime import date
@@ -50,6 +51,29 @@ def kebab_case(name: str) -> str:
     s = re.sub(r"[^0-9a-z一-鿿]+", "-", s)
     s = re.sub(r"-{2,}", "-", s).strip("-")
     return s or "project"
+
+
+def detect_github(proj_dir: Path) -> str | None:
+    """探测项目的 GitHub 来源，返回 'owner/repo@branch'；非 git / 无 origin / 解析失败 → None。
+    设备间同步用：服务器据此字段拉该 repo 的三件套（见 02 §1.2 / server/README.md）。"""
+    if not (proj_dir / ".git").exists():
+        return None
+    try:
+        url = subprocess.check_output(
+            ["git", "-C", str(proj_dir), "remote", "get-url", "origin"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+        branch = subprocess.check_output(
+            ["git", "-C", str(proj_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+    # 提取 owner/repo（去 .git 后缀），兼容 https 与 ssh 两种 remote
+    m = re.search(r"[:/]([^/]+/[^/]+?)(?:\.git)?$", url)
+    if not m:
+        return None
+    return f"{m.group(1)}@{branch}"
 
 
 def load_registry() -> dict:
@@ -142,7 +166,8 @@ def cli():
 @cli.command()
 @click.argument("path")
 @click.option("--name", default=None, help="看板显示名(缺省取目录名)")
-def add(path: str, name: str | None):
+@click.option("--github", default=None, help="GitHub 来源 owner/repo@branch(缺省自动探测 git remote;设备间同步用)")
+def add(path: str, name: str | None, github: str | None):
     """登记项目进 registry(原子写)。不生成任何文件——看板字段从三件套读。"""
     proj_dir = Path(path).expanduser().resolve()
     # 校验路径
@@ -180,6 +205,8 @@ def add(path: str, name: str | None):
     click.echo("提示: 看板字段从三件套读，登记后用 /outkanban 生成展示信息")
 
     display_name = name if name else proj_dir.name
+    # 设备间同步：显式 --github 优先，否则探测 git remote 自动填 owner/repo@branch
+    gh = github if github else detect_github(proj_dir)
     entry = {
         "id": project_id,
         "name": display_name,
@@ -188,9 +215,15 @@ def add(path: str, name: str | None):
         "pinned": False,
         "added": date.today().isoformat(),
     }
+    if gh:
+        entry["github"] = gh
     reg["projects"].append(entry)
     write_registry_atomic(reg)
     click.echo(f"已登记: {project_id}  ({display_name})  -> {abs_path}")
+    if gh:
+        click.echo(f"  GitHub 来源: {gh}（设备间同步看板会从这里拉）")
+    else:
+        click.echo("  提示: 未探测到 GitHub remote，该项目不会出现在手机/跨设备镜像看板（本地桌面看板正常）")
 
 
 @cli.command()

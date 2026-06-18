@@ -37,6 +37,16 @@ fi
 
 command -v pnpm >/dev/null 2>&1 || { warn "未检测到 pnpm"; exit 1; }
 
+# 设备间同步配置：若存在 .dev/push.env（gitignore，James 自填），source 进来，
+# 让 tauri dev 继承 TB_BOARD_URL（App 据此只读拉服务器 board.json 算同步徽章；
+# 未配置则远端同步关闭、App 仍本地解析渲染，行为与之前一致）。见 server/README.md。
+PUSH_ENV="$RUN_DIR/push.env"
+if [ -f "$PUSH_ENV" ]; then
+  # shellcheck disable=SC1090
+  set -a; . "$PUSH_ENV"; set +a
+  [ -n "${TB_BOARD_URL:-}" ] && ok "已启用设备间同步 ← $TB_BOARD_URL"
+fi
+
 log "独立启动 TaskBoard dev（脱离当前终端，关 VSCode 不影响）"
 # nohup + 重定向 + & 让进程脱离终端会话；disown 进一步从作业表摘除
 cd "$APP_DIR"

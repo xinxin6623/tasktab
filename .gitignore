@@ -16,3 +16,6 @@ app/src-tauri/gen/schemas/
 # Python 缓存
 __pycache__/
 *.py[cod]
+
+# Go 编译产物（server/build.sh 交叉编译输出，重活在本地、不进 git）
+server/tasktab-board
