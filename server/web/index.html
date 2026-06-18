@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#14151a" />
+  <title>TaskBoard</title>
+  <!--
+    中文说明：手机端只读看板网页（零后端依赖、纯静态）。
+    数据来自 /board.json（桌面 App 单向推送，带详情字段：intro/arch_mermaid/stages/handoff_detail）。
+    两级视图：卡片列表（对齐桌面 Card）→ 点卡片进详情（对齐桌面 Detail，去掉 VS Code/open 等本地按钮）。
+    每 10s（页面可见时）轮询刷新；切回前台立即刷新。架构图用本地自托管 mermaid.min.js 渲染（不依赖外部 CDN）。
+  -->
+  <style>
+    :root {
+      --bg: #14151a; --card: #1e2027; --card-border: #2c2f38;
+      --text: #e6e8ee; --muted: #8b90a0; --track: #2c2f38;
+      --active: #4caf82; --paused: #c99a3a; --done: #5b8def; --warn: #d96a6a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    .topbar {
+      position: sticky; top: 0; z-index: 10; background: var(--bg);
+      padding: 16px 16px 10px; border-bottom: 1px solid var(--card-border);
+    }
+    .topbar h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+    .topbar-row { display: flex; align-items: center; gap: 12px; }
+    .summary { display: flex; gap: 14px; margin-top: 8px; font-size: 13px; color: var(--muted); flex-wrap: wrap; }
+    .summary .count { display: inline-flex; align-items: center; gap: 5px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.active { background: var(--active); } .dot.paused { background: var(--paused); }
+    .dot.done { background: var(--done); } .dot.error { background: var(--warn); }
+    .updated-at { font-size: 11px; color: var(--muted); margin-left: auto; }
+    .back-btn {
+      background: var(--card); border: 1px solid var(--card-border); color: var(--text);
+      font-size: 14px; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+    }
+    .back-btn:active { background: var(--card-border); }
+
+    .grid { padding: 14px; display: grid; gap: 12px; grid-template-columns: 1fr; }
+    @media (min-width: 680px) { .grid { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 1040px) { .grid { grid-template-columns: 1fr 1fr 1fr; } }
+
+    .card { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 14px 16px; cursor: pointer; transition: border-color .15s; }
+    .card:active { border-color: #3a3e4a; }
+    .card.error { border-color: #4a3636; }
+    .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .card-title { margin: 0; font-size: 16px; font-weight: 600; line-height: 1.35; }
+    .pin { color: var(--paused); }
+    .badge { font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; flex-shrink: 0; }
+    .badge.active { background: rgba(76,175,130,.15); color: var(--active); }
+    .badge.paused { background: rgba(201,154,58,.15); color: var(--paused); }
+    .badge.done { background: rgba(91,141,239,.15); color: var(--done); }
+    .badge.unknown, .badge.warn { background: rgba(217,106,106,.15); color: var(--warn); }
+
+    .progress { margin: 12px 0 6px; }
+    .progress-track { height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }
+    .progress-fill { height: 100%; background: var(--active); border-radius: 999px; transition: width .4s; }
+    .progress-meta { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); margin-top: 5px; }
+    .card-desc { font-size: 13px; color: #c3c7d2; margin: 8px 0 4px; line-height: 1.5; }
+    .next { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: #b6bbc8; line-height: 1.55; }
+    .next li { margin: 2px 0; }
+    .warn-msg { font-size: 12.5px; color: var(--warn); margin: 8px 0; line-height: 1.5; }
+    .card-foot { margin-top: 10px; font-size: 11.5px; color: var(--muted); }
+
+    /* 详情页 */
+    .detail-wrap { padding: 14px 16px 40px; max-width: 760px; margin: 0 auto; }
+    .detail-block { margin-bottom: 18px; }
+    .detail-title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 19px; font-weight: 700; }
+    .blocked { background: rgba(217,106,106,.1); border: 1px solid #4a3636; border-radius: 10px; padding: 10px 14px; }
+    .blocked-title { color: var(--warn); font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+    .blocked ul { margin: 0; padding-left: 18px; font-size: 13px; color: #d8b3b3; }
+    .detail-intro { font-size: 14px; line-height: 1.6; color: #c8ccd6; margin: 0; }
+    .detail-h { font-size: 14px; font-weight: 600; color: var(--muted); margin: 0 0 8px; letter-spacing: .5px; }
+    .stage-list { list-style: none; margin: 0; padding: 0; }
+    .stage-row { display: flex; align-items: baseline; gap: 8px; padding: 5px 0; font-size: 13.5px; line-height: 1.5; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .stage-row .stage-mark { color: var(--muted); flex-shrink: 0; }
+    .stage-row.done .stage-mark { color: var(--active); }
+    .stage-row.done .stage-name { color: var(--muted); }
+    .stage-name { color: var(--text); }
+    .stage-desc { color: var(--muted); font-size: 12.5px; }
+    .handoff-detail { font-size: 13.5px; line-height: 1.65; color: #c3c7d2; background: var(--card); border: 1px solid var(--card-border); border-radius: 10px; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; }
+    .handoff-detail strong { color: var(--text); }
+    .handoff-detail ul { margin: 6px 0; padding-left: 18px; }
+    .mermaid-box { background: #fff; border-radius: 10px; padding: 10px; overflow-x: auto; }
+    .mermaid-box svg { max-width: 100%; height: auto; }
+    .detail-meta { font-size: 11.5px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+    .detail-path { word-break: break-all; }
+
+    .notice { padding: 40px 20px; text-align: center; color: var(--muted); font-size: 14px; }
+    .spin { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--track); border-top-color: var(--muted); border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -3px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="topbar" id="topbar">
+    <div class="topbar-row"><h1>TaskBoard</h1></div>
+    <div class="summary" id="summary"><span class="count"><span class="spin"></span> 加载中…</span></div>
+  </div>
+  <div id="root"><div class="notice">加载中…</div></div>
+
+  <script>
+    const STATUS_LABEL = { active: "进行中", paused: "已暂停", done: "已完成", unknown: "未知" };
+    const POLL_MS = 10000;
+
+    // 视图状态：列表 or 某个项目详情（按 id）。详情存活期间继续轮询，数据更新后原地刷新。
+    let view = { kind: "list" };
+    let lastBoard = null;
+
+    // mermaid 懒加载：3.3MB 的库只在第一次看架构图时才拉，列表页不付这个成本。
+    let mermaidPromise = null;
+    function ensureMermaid() {
+      if (mermaidPromise) return mermaidPromise;
+      mermaidPromise = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "/mermaid.min.js";
+        s.onload = () => {
+          mermaid.initialize({ startOnLoad: false, theme: "default", securityLevel: "loose" });
+          resolve(window.mermaid);
+        };
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+      return mermaidPromise;
+    }
+
+    function esc(s) {
+      return String(s == null ? "" : s).replace(/[&<>"']/g, c =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    }
+    // 接力点明细是 markdown 原文：只做最轻量的安全渲染（转义 + 加粗 + 换行），不引 md 库。
+    function renderDetailText(md) {
+      return esc(md).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+    }
+
+    // —— 卡片（对齐桌面 Card）——
+    function renderCard(p) {
+      if (p.error) {
+        const label = p.error.kind === "missing" ? "未接入看板" : "格式异常";
+        return `<div class="card error" data-id="${esc(p.id)}">
+          <div class="card-head"><h2 class="card-title">${esc(p.name)}</h2><span class="badge warn">⚠ ${label}</span></div>
+          <div class="warn-msg">${esc(p.error.message)}</div>
+          <div class="card-foot">${esc(p.id)}</div>
+        </div>`;
+      }
+      const pct = Math.round(p.overall_progress || 0);
+      const nextTwo = (p.next || []).slice(0, 2);
+      const status = p.status || "unknown";
+      return `<div class="card" data-id="${esc(p.id)}">
+        <div class="card-head">
+          <h2 class="card-title">${p.pinned ? '<span class="pin">★ </span>' : ""}${esc(p.name)}</h2>
+          <span class="badge ${esc(status)}">${esc(STATUS_LABEL[status] || status)}</span>
+        </div>
+        <div class="progress">
+          <div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <div class="progress-meta"><span>整体进度</span><span>${pct}%</span></div>
+        </div>
+        ${p.desc ? `<div class="card-desc">${esc(p.desc)}</div>` : ""}
+        ${nextTwo.length ? `<ul class="next">${nextTwo.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : ""}
+        <div class="card-foot">更新 ${esc(p.updated) || "—"}</div>
+      </div>`;
+    }
+
+    // —— 详情（对齐桌面 Detail，去掉本地按钮）——
+    function renderDetail(p) {
+      const status = p.status || "unknown";
+      if (p.error) {
+        const label = p.error.kind === "missing" ? "未接入看板" : "格式异常";
+        return `<div class="detail-wrap">
+          <div class="warn-msg detail-block">${esc(p.error.message || label)}</div>
+          <div class="detail-path">${esc(p.path)}</div>
+        </div>`;
+      }
+      const pct = Math.round(p.overall_progress || 0);
+      const blocked = p.blocked_by || [];
+      const stages = p.stages || [];
+      let h = `<div class="detail-wrap">`;
+      h += `<div class="progress detail-block"><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
+            <div class="progress-meta"><span>整体进度</span><span>${pct}%</span></div></div>`;
+      if (blocked.length) {
+        h += `<div class="blocked detail-block"><div class="blocked-title">⚠ 被阻塞</div>
+              <ul>${blocked.map(b => `<li>${esc(b)}</li>`).join("")}</ul></div>`;
+      }
+      if (p.intro) h += `<p class="detail-intro detail-block">${esc(p.intro)}</p>`;
+      if (p.handoff_detail) {
+        h += `<section class="detail-block"><h3 class="detail-h">当前接力点</h3>
+              <div class="handoff-detail">${renderDetailText(p.handoff_detail)}</div></section>`;
+      }
+      if (stages.length) {
+        h += `<section class="detail-block"><h3 class="detail-h">项目阶段</h3><ul class="stage-list">` +
+          stages.map(s => `<li class="stage-row ${s.done ? "done" : ""}">
+            <span class="stage-mark">${s.done ? "✓" : "○"}</span><span class="stage-name">${esc(s.name)}</span>
+            ${s.desc ? `<span class="stage-desc">${esc(s.desc)}</span>` : ""}</li>`).join("") +
+          `</ul></section>`;
+      }
+      if (p.arch_mermaid) {
+        h += `<section class="detail-block"><h3 class="detail-h">架构图</h3>
+              <div class="mermaid-box" id="arch-box"></div></section>`;
+      }
+      h += `<div class="detail-meta"><span>更新 ${esc(p.updated) || "—"}</span><span class="detail-path">${esc(p.path)}</span></div>`;
+      h += `</div>`;
+      return h;
+    }
+
+    function renderSummary(board) {
+      const s = board.summary || { active: 0, paused: 0, done: 0, error: 0 };
+      const ts = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      const parts = [
+        `<span class="count"><span class="dot active"></span>进行中 ${s.active || 0}</span>`,
+        `<span class="count"><span class="dot paused"></span>已暂停 ${s.paused || 0}</span>`,
+        `<span class="count"><span class="dot done"></span>已完成 ${s.done || 0}</span>`,
+      ];
+      if (s.error > 0) parts.push(`<span class="count"><span class="dot error"></span>异常 ${s.error}</span>`);
+      parts.push(`<span class="updated-at">同步 ${ts}</span>`);
+      return parts.join("");
+    }
+
+    // 渲染当前视图（用 lastBoard）
+    function render() {
+      const board = lastBoard;
+      if (!board) return;
+      const projects = board.projects || [];
+      const topbar = document.getElementById("topbar");
+      const root = document.getElementById("root");
+
+      if (view.kind === "detail") {
+        const p = projects.find(x => x.id === view.id);
+        if (!p) { view = { kind: "list" }; return render(); } // 项目没了，退回列表
+        topbar.innerHTML = `<div class="topbar-row">
+            <button class="back-btn" onclick="goList()">← 返回</button>
+            <h1 class="detail-title">${p.pinned ? '<span class="pin">★ </span>' : ""}${esc(p.name)}
+              <span class="badge ${esc(p.status || "unknown")}">${esc(STATUS_LABEL[p.status] || p.status || "未知")}</span></h1>
+          </div>`;
+        root.innerHTML = renderDetail(p);
+        // 架构图渲染（mermaid 懒加载本地库；失败不影响其余内容）
+        if (p.arch_mermaid) {
+          const box = document.getElementById("arch-box");
+          if (box) box.innerHTML = '<div class="notice" style="background:#fff;color:#888"><span class="spin"></span> 渲染架构图…</div>';
+          ensureMermaid()
+            .then(m => m.render("arch-svg-" + Date.now(), p.arch_mermaid))
+            .then(({ svg }) => { if (box) box.innerHTML = svg; })
+            .catch(() => { if (box) box.innerHTML = '<div class="notice" style="color:#888">架构图渲染失败</div>'; });
+        }
+        return;
+      }
+
+      // 列表视图
+      topbar.innerHTML = `<div class="topbar-row"><h1>TaskBoard</h1></div>
+        <div class="summary">${renderSummary(board)}</div>`;
+      if (board._empty || projects.length === 0) {
+        root.innerHTML = `<div class="notice">${board._empty ? "看板还没收到桌面端推送的数据。" : "还没有登记任何项目。"}</div>`;
+        return;
+      }
+      root.innerHTML = `<div class="grid">${projects.map(renderCard).join("")}</div>`;
+      root.querySelectorAll(".card").forEach(el =>
+        el.addEventListener("click", () => { view = { kind: "detail", id: el.dataset.id }; render(); window.scrollTo(0, 0); }));
+    }
+
+    function goList() { view = { kind: "list" }; render(); window.scrollTo(0, 0); }
+
+    async function load() {
+      try {
+        const res = await fetch("/board.json", { cache: "no-store" });
+        lastBoard = await res.json();
+        render();
+      } catch (e) {
+        if (!lastBoard) document.getElementById("root").innerHTML = `<div class="notice">加载失败：${esc(e.message || e)}</div>`;
+      }
+    }
+
+    load();
+    setInterval(() => { if (!document.hidden) load(); }, POLL_MS);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });
+  </script>
+</body>
+</html>

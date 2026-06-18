@@ -7,6 +7,7 @@
 //          App 内增删（add_project / remove_project，登记逻辑见 registry.rs，与 cra.py 对齐）。
 
 mod board;
+mod push;
 mod registry;
 mod watcher;
 
@@ -93,6 +94,9 @@ pub fn run() {
                     .unwrap_or_else(|| std::path::Path::new(".")),
             );
             watcher::spawn(app.handle().clone());
+            // 「手机查看」：启动即推一次初始快照，手机端不必等到首次文件变化才有数据。
+            // 受 TB_PUSH_URL 控制，未配置则 no-op（见 push.rs）。
+            push::push_board_async();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

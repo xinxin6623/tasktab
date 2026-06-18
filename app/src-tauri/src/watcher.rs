@@ -111,6 +111,10 @@ fn run_watch_loop(app_handle: AppHandle) -> Result<(), String> {
         if let Err(e) = app_handle.emit(EVENT_BOARD_CHANGED, ()) {
             eprintln!("[watcher] emit board-changed 失败: {e}");
         }
+
+        // 「手机查看」：文件一变，顺带把最新看板快照单向推到 James 的服务器（受 TB_PUSH_URL 控制，
+        // 未配置则 no-op）。异步、失败只记日志，绝不影响桌面看板。详见 push.rs 的架构边界说明。
+        crate::push::push_board_async();
     }
 
     Ok(())

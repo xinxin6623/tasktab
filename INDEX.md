@@ -29,15 +29,16 @@
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
 ### 概述
-**继续 v1.0 开发（边用边改，用 `./scripts/dev-detached.sh` 起独立看板）；v1.0 定稿后再走 install.sh 正式打包**
+**「手机查看」已上线 —— 手机打开 https://kanban.alphaxbot.xyz 即看实时看板（桌面 App 文件一变就推）；继续 v1.0 开发，定稿后 install.sh 正式打包**
 
 ### 明细
-**2026-06-14**：① 开发期启停脚本就位（dev-detached / dev-stop，App 脱离 VSCode 常驻）。② PROJECT_PROGRESS 退役已升格为协议层 standard-v3，tasktab 升 v3（吸收器机制见 myskills/project-init/references/migrations.md）。
+**2026-06-17**：「手机查看」功能上线。App 把已解析的 board.json 单向推到火山云 ECS，手机浏览器只读渲染卡片，文件一变看板秒级跟随：
 
-两个待清尾巴（不阻塞开发，定稿前处理）：
+- 服务端 `server/`：纯标准库 Go 单文件（`POST /ingest` 原子写 + 静态托管移动端只读网页），已部署为 swarm service `tasktab-board`（scratch 镜像 4.89MB、限 64M 内存），Traefik 路由 `server/deploy/tasktab-kanban.yml` 绑 `kanban.alphaxbot.xyz`，LE 证书自动签。
+- App 端 `push.rs`：ureq 单向 POST，受 `TB_PUSH_URL` 开关（未设则功能关闭、行为不变），挂在 watcher emit 后 + 启动初始推一次。「App 端零网络」铁律的唯一受控例外（仅单向输出）。
+- 推送地址走 `.dev/push.env`（gitignore，dev-detached.sh 启动时 source），不硬编码、不进 git。真机已验证：App 启动实推真实看板（6 项目）。
 
-- `scripts/install.sh` 第 19/59-65 行仍装已退役的 progress-tracker skill，正式打包前清掉。
-- App 端验收：dev 模式真机点开看板确认各项目卡片正常（cc-switch + tasktab 已发布）。
+旧尾巴（不阻塞）：`scripts/install.sh` 第 19/59-65 行仍装已退役 progress-tracker，打包前清掉；dev 模式真机点开桌面看板终验各卡片。`install.sh` 正式打包路径也需把 `TB_PUSH_URL` 配置注入（目前只 dev 脚本带）。
 
 ## 项目简介
 
@@ -74,6 +75,7 @@ tasktab/
 ├── CHANGELOG.md          # 强标签演绎记录
 ├── PROJECT_PROGRESS.md   # ⚠️ 已退役，仅历史快照
 ├── app/                  # Tauri 2（src/ 前端 + src-tauri/ Rust 后端）— M2–M4
+├── server/               # 手机查看：看板镜像服务端（Go 标准库）+ web/ 只读网页
 ├── cli/cra.py            # 登记 CLI（Python）— M1
 ├── scripts/
 │   ├── dev-detached.sh   # ▶ 开发期独立启动（脱离 VSCode）
@@ -90,6 +92,7 @@ tasktab/
 | `docs/` | 通用三件套协议 `trio-protocol.md` | 已建 |
 | `cli/` | `cra` CLI（M1 交付） | ✅ 已完成 |
 | `app/` | Tauri 2 桌面应用（M2–M4 交付） | ✅ 已完成（待真机终验） |
+| `server/` | 手机查看：看板镜像服务端 + 只读网页 | 🚧 代码就位，待部署 ECS |
 | `scripts/` | `dev-detached.sh` / `dev-stop.sh` 开发期启停 + `install.sh` 打包 | ✅ 已完成 |
 
 ## 常用操作
