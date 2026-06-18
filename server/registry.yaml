@@ -1,0 +1,34 @@
+# 看板镜像服务端读取的项目名单（单一真相）。
+# 服务器只用 id / name / github / pinned；不含本机绝对路径。
+# 字段 schema 见 同步看板files/02-实现步骤.md §1.2。
+# github 字段格式 owner/repo@branch，是服务器拉取锚点；缺该字段的项目降级为「未配置 github」。
+version: 1
+projects:
+- id: cc-switch
+  name: cc-switch
+  pinned: false
+  github: xinxin6623/cc-switch@main
+- id: tasktab
+  name: TaskBoard
+  pinned: false
+  github: xinxin6623/tasktab@main
+- id: xiaozhi
+  name: xiaozhi
+  pinned: false
+  github: xinxin6623/xiaozhi-esp32@main
+- id: myskills
+  name: myskills
+  pinned: false
+  github: xinxin6623/myskills@main
+- id: photo-promo
+  name: photo-promo
+  pinned: false
+  github: xinxin6623/photo-promo@main
+- id: bizwiki
+  name: bizwiki
+  pinned: false
+  github: xinxin6623/bizwiki@phase5-business-events
+- id: tender-monitor
+  name: Tender-monitor
+  pinned: false
+  github: xinxin6623/Tender-monitor0.1@main
