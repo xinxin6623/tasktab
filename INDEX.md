@@ -29,7 +29,7 @@
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
 ### 概述
-**「设备间同步」代码就位（四端全绿）—— 待 ① 真机点开桌面 App 看同步徽章 ② 服务器重新部署注入 TB_REGISTRY/TB_GH_TOKEN 切到聚合模式**
+**「设备间同步」已合 main + registry 已上 GitHub、服务器实测能直连 GitHub —— 待 ① 真机点桌面 App 看同步徽章 ② 服务器重部署注入 TB_REGISTRY/TB_GH_TOKEN 切聚合模式（需先备好 GitHub PAT）**
 
 ### 明细
 **2026-06-18**：「设备间同步」改造完成。架构从「App 推送」反转为「GitHub 单一真相 → 服务器聚合 → 各端只读」，两台设备各自 push 到 GitHub 即同步看板。代码四端全绿、本地真实聚合已验证，剩两个需真机/服务器的收尾：
@@ -38,9 +38,11 @@
 - App 端：`push.rs` 退役（→ `archive/push-retired/`），新增 `sync.rs`（只读 git 状态 + 只读拉 board.json）。前端 `sync.ts` 算同步徽章（已同步/待推送/待拉取/未提交/分叉），卡片显示徽章、顶栏显示服务器聚合时间。「App 端零网络」收敛为「仅两个受控只读例外」。
 - registry 加 `github` 字段（owner/repo@branch），`cra` + App 内 add 都自动探测 git remote 填充。
 
-**待办**（两个，需真机/服务器，不阻塞代码）：
+**2026-06-18 增量**：feat/mobile-board-mirror 已 `--no-ff` 合进 main 并 push。registry 已纳入仓 `server/registry.yaml`（减肥版：只留 id/name/github/pinned，去掉本机绝对路径与退役的 progress_file；tasktab 自身 github 改 @main），push 到 main。**实测国内 ECS 能直连 GitHub**（api.github.com 200/1.9s、raw 可达、拉公开文件 200/3.5s）——聚合架构在国内服务器跑得通；轮询 60s，2-3.5s 延迟无所谓；聚合失败时保留上轮数据不崩。隐患：国内连 GitHub 长期不稳是常态、私有 repo 带 token 那条路待真配后验。
+
+**待办**（需真机/服务器，不阻塞代码）：
 1. 真机：`./scripts/dev-detached.sh` 起桌面 App（先在 `.dev/push.env` 填 `TB_BOARD_URL`），点开看同步徽章是否正确。
-2. 服务器：重新部署 `server/`，给 swarm service 注入 `TB_REGISTRY`（GitHub 坐标）+ `TB_GH_TOKEN`（PAT，走 secret）+ `TB_POLL_SEC`，切到聚合模式（外向操作，需先确认）。
+2. 服务器（走 huoshan-server，`ssh volcano`，现跑旧镜像+兼容 `[ingest]` 模式、环境变量全空）：用 main 最新代码重构 `server/` 镜像并部署，给 swarm service `tasktab-board` 注入 `TB_REGISTRY=xinxin6623/tasktab@main:server/registry.yaml` + `TB_GH_TOKEN`（PAT，走 secret）+ `TB_POLL_SEC=60`，看日志从 `[ingest]` 转 `[aggregate]`，并验私有 repo 拉得到。**前置：James 先生成 GitHub PAT（repo 读权限）**。外向操作，先确认。
 
 旧尾巴（不阻塞）：`scripts/install.sh` 仍装已退役 progress-tracker，打包前清掉；install.sh 正式打包路径需注入 `TB_BOARD_URL`。
 
