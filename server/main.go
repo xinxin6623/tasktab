@@ -6,12 +6,13 @@
 //   用 parse.go（对齐 board.rs 契约）解析聚合成 board.json。各端（桌面 App / 手机网页）只读它。
 //   「文件同步到 GitHub = 过了看板」。聚合循环见 github.go::aggregate。
 //
-//   兼容：旧的 POST /ingest（App 单向推）仍保留作安全网——但 TB_REGISTRY 配置后由聚合循环
-//   接管 board.json，ingest 一般不再使用。
+//   兼容：旧的 POST /ingest（App 单向推）仅在【未配置 TB_REGISTRY 的兼容模式】下可用。
+//   一旦启用聚合（设了 TB_REGISTRY），board.json 由聚合循环独占写入，/ingest 直接返回 409
+//   拒绝——否则残留的旧版 App 仍可推送把聚合数据覆盖掉。
 //
 // 路由：
 //   GET  /board.json  返回当前聚合的 board JSON（网页/桌面 App 轮询拉取）
-//   POST /ingest      [兼容] 接收外部推来的 board JSON，原子写入（聚合模式下一般不用）
+//   POST /ingest      [兼容] 接收外部推来的 board JSON，原子写入；聚合模式下禁用（409）
 //   GET  /            静态看板网页（web/index.html）
 //   GET  /healthz     健康检查
 //
@@ -54,16 +55,25 @@ func main() {
 
 	// 聚合循环：配置了 TB_REGISTRY 即启用「GitHub 拉取 → 解析 → 写 board.json」后台循环。
 	// 未配置则退回旧的纯 ingest 模式（向后兼容）。
-	if regSpec := os.Getenv("TB_REGISTRY"); regSpec != "" {
-		go runAggregateLoop(context.Background(), regSpec, dataPath)
+	// aggregating 标志：聚合模式下 board.json 由聚合循环独占写入，/ingest 必须拒绝——
+	// 否则残留的旧版 App 仍可 POST /ingest 把聚合数据覆盖掉（曾经的隐患）。
+	aggregating := os.Getenv("TB_REGISTRY") != ""
+	if aggregating {
+		go runAggregateLoop(context.Background(), os.Getenv("TB_REGISTRY"), dataPath)
 	} else {
 		log.Printf("未设置 TB_REGISTRY，运行在兼容模式（仅 /ingest），不做 GitHub 聚合")
 	}
 
 	mux := http.NewServeMux()
 
-	// POST /ingest —— 收 App 推来的 board JSON，原子写盘（写临时文件 + rename，杜绝半截写入）
+	// POST /ingest —— [兼容] 收 App 推来的 board JSON，原子写盘（写临时文件 + rename，杜绝半截写入）。
+	// 聚合模式下禁用：board.json 由聚合循环独占，收到 ingest 直接拒绝并打日志（防旧 push 源覆盖）。
 	mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
+		if aggregating {
+			log.Printf("[ingest] 已拒绝：聚合模式下 /ingest 禁用（来源 %s，可能是残留的旧版 App 推送）", r.RemoteAddr)
+			http.Error(w, "ingest disabled in aggregate mode", http.StatusConflict)
+			return
+		}
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
