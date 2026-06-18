@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 本地交叉编译 tasktab-board 为 linux/amd64 静态二进制。
-# 火山云 ECS 不直连 github、内存紧 —— 重活（编译）放本地，服务器只跑成品（见 huoshan-server skill §6）。
+# 火山云 ECS 内存紧（4GB）—— 重活（Go 编译）放本地，服务器只跑成品。
+# 注：服务端运行时会直连 GitHub API 做聚合（ECS 实测可直连），编译放本地纯为省内存，与连通性无关。
 #
 # 用法：
 #   ./build.sh            # 仅交叉编译出 ./tasktab-board（linux/amd64）
