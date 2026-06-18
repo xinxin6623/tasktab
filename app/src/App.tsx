@@ -2,11 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { AddResult, Board, ProjectCard } from "./types";
+import type { AddResult, Board, LocalGitStatus, ProjectCard } from "./types";
 import { Card } from "./components/Card";
 import { Detail } from "./components/Detail";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { ToastProvider, useToast } from "./components/Toast";
+import { computeSyncBadge, formatTs, remoteUpdatedAt, type RemoteBoardLike } from "./sync";
 
 // 视图状态：看板 or 某个项目详情
 type View = { kind: "board" } | { kind: "detail"; id: string };
@@ -17,6 +18,9 @@ function BoardView() {
   const [view, setView] = useState<View>({ kind: "board" });
   // 待删除项目（确认弹窗）
   const [pendingDelete, setPendingDelete] = useState<ProjectCard | null>(null);
+  // 设备间同步：本地 git 状态（按 id 索引）+ 服务器聚合的 board.json（取 commit / generated_at）
+  const [localSync, setLocalSync] = useState<Record<string, LocalGitStatus>>({});
+  const [remoteBoard, setRemoteBoard] = useState<RemoteBoardLike | null>(null);
   const toast = useToast();
 
   const refresh = useCallback(() => {
@@ -28,21 +32,45 @@ function BoardView() {
       .catch((e) => setLoadErr(String(e)));
   }, []);
 
+  // 刷新同步状态：并行拉「本地 git 状态」+「服务器 board.json」，失败不影响本地看板（徽章降级）。
+  const refreshSync = useCallback(() => {
+    invoke<LocalGitStatus[]>("load_local_sync")
+      .then((list) => {
+        const map: Record<string, LocalGitStatus> = {};
+        for (const s of list) map[s.id] = s;
+        setLocalSync(map);
+      })
+      .catch(() => setLocalSync({})); // 取不到本地 git 状态 → 徽章按 unknown，看板照常
+    invoke<RemoteBoardLike | null>("load_remote_board")
+      .then((b) => setRemoteBoard(b ?? null))
+      .catch(() => setRemoteBoard(null)); // 远端拉不到 → offline 徽章，本地看板照常
+  }, []);
+
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    refreshSync();
+  }, [refresh, refreshSync]);
 
-  // M4：订阅 Rust 侧 notify 监听发出的 board-changed 事件（registry.yaml / 任一 PROGRESS.md 变更，
+  // M4：订阅 Rust 侧 notify 监听发出的 board-changed 事件（registry.yaml / 任一三件套变更，
   // 去抖 500ms 后触发），收到就整体重拉看板，用户无需任何手动操作。
+  // 设备间同步：文件一变可能意味着本地刚提交/改动，顺带刷新同步徽章。
   // 组件卸载时 unlisten，避免重复订阅。
   useEffect(() => {
     const unlistenPromise = listen("board-changed", () => {
       refresh();
+      refreshSync();
     });
     return () => {
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [refresh]);
+  }, [refresh, refreshSync]);
+
+  // 设备间同步：定时（30s）刷新一次同步徽章——另一台设备 push 后服务器侧 commit 会变，
+  // 即便本地文件没动，也要让「待拉取」徽章及时更新。本地 git 状态也一并刷新。
+  useEffect(() => {
+    const timer = setInterval(refreshSync, 30_000);
+    return () => clearInterval(timer);
+  }, [refreshSync]);
 
   // 添加项目：目录选择对话框 → Rust add_project（登记逻辑与 cra.py 对齐）→ 刷新
   const handleAdd = async () => {
@@ -99,6 +127,12 @@ function BoardView() {
           {summary.error > 0 && (
             <span className="count"><span className="dot error" />异常 {summary.error}</span>
           )}
+          {/* 设备间同步：服务器（看板镜像）最后聚合时间。未连服务器时不显示。 */}
+          {remoteBoard && remoteUpdatedAt(remoteBoard) && (
+            <span className="count sync-updated" title="看板服务器最后从 GitHub 聚合的时间">
+              ⟳ 看板 {formatTs(remoteUpdatedAt(remoteBoard))}
+            </span>
+          )}
         </div>
       </div>
 
@@ -116,6 +150,7 @@ function BoardView() {
             <Card
               key={p.id}
               p={p}
+              sync={computeSyncBadge(p.id, localSync[p.id], remoteBoard)}
               onOpen={(id) => setView({ kind: "detail", id })}
               onDelete={(c) => setPendingDelete(c)}
             />

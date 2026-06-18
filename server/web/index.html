@@ -7,7 +7,8 @@
   <title>TaskBoard</title>
   <!--
     中文说明：手机端只读看板网页（零后端依赖、纯静态）。
-    数据来自 /board.json（桌面 App 单向推送，带详情字段：intro/arch_mermaid/stages/handoff_detail）。
+    数据来自 /board.json（服务器从 GitHub 聚合各 repo 三件套，带详情字段：intro/arch_mermaid/stages/handoff_detail
+    + commit/generated_at）。详见 server/github.go 聚合循环。
     两级视图：卡片列表（对齐桌面 Card）→ 点卡片进详情（对齐桌面 Detail，去掉 VS Code/open 等本地按钮）。
     每 10s（页面可见时）轮询刷新；切回前台立即刷新。架构图用本地自托管 mermaid.min.js 渲染（不依赖外部 CDN）。
   -->
@@ -207,16 +208,25 @@
       return h;
     }
 
+    // 服务器聚合时间（generated_at, RFC3339）格式化成「MM-DD HH:mm」。无则退回网页当前时间。
+    function fmtGenerated(board) {
+      const raw = board.generated_at;
+      const d = raw ? new Date(raw) : new Date();
+      if (isNaN(d.getTime())) return raw || "—";
+      const pad = n => String(n).padStart(2, "0");
+      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
     function renderSummary(board) {
       const s = board.summary || { active: 0, paused: 0, done: 0, error: 0 };
-      const ts = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
       const parts = [
         `<span class="count"><span class="dot active"></span>进行中 ${s.active || 0}</span>`,
         `<span class="count"><span class="dot paused"></span>已暂停 ${s.paused || 0}</span>`,
         `<span class="count"><span class="dot done"></span>已完成 ${s.done || 0}</span>`,
       ];
       if (s.error > 0) parts.push(`<span class="count"><span class="dot error"></span>异常 ${s.error}</span>`);
-      parts.push(`<span class="updated-at">同步 ${ts}</span>`);
+      // generated_at = 服务器最后从 GitHub 聚合看板的时间（设备同步方案的「看板新鲜度」）
+      parts.push(`<span class="updated-at" title="看板服务器最后从 GitHub 聚合的时间">⟳ 看板 ${fmtGenerated(board)}</span>`);
       return parts.join("");
     }
 

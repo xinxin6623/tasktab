@@ -1,4 +1,4 @@
-import type { ProjectCard } from "../types";
+import type { ProjectCard, SyncBadge } from "../types";
 
 // status 徽标中文文案
 const STATUS_LABEL: Record<string, string> = {
@@ -8,13 +8,25 @@ const STATUS_LABEL: Record<string, string> = {
   unknown: "未知",
 };
 
+// 同步徽章小组件：kind=unknown 时不渲染（非 git / 信息不足）。
+function SyncTag({ sync }: { sync?: SyncBadge }) {
+  if (!sync || sync.kind === "unknown" || !sync.label) return null;
+  return (
+    <span className={`sync-badge ${sync.kind}`} title={sync.title}>
+      {sync.label}
+    </span>
+  );
+}
+
 // 卡片点击进入详情；右上角「移除」走确认弹窗（仅从看板移除，不删文件）。
 export function Card({
   p,
+  sync,
   onOpen,
   onDelete,
 }: {
   p: ProjectCard;
+  sync?: SyncBadge;
   onOpen: (id: string) => void;
   onDelete: (p: ProjectCard) => void;
 }) {
@@ -82,6 +94,7 @@ export function Card({
 
       <div className="card-foot">
         <span>更新 {p.updated || "—"}</span>
+        <SyncTag sync={sync} />
       </div>
     </div>
   );

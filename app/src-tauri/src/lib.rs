@@ -7,12 +7,13 @@
 //          App 内增删（add_project / remove_project，登记逻辑见 registry.rs，与 cra.py 对齐）。
 
 mod board;
-mod push;
 mod registry;
+mod sync;
 mod watcher;
 
 use board::{Board, ProjectDetail};
 use registry::AddResult;
+use sync::LocalGitStatus;
 
 /// Tauri command：加载整盘看板数据。永不 panic——单项目错误降级为卡片 error 标记。
 #[tauri::command]
@@ -79,6 +80,21 @@ fn remove_project(id: String) -> Result<(), String> {
     registry::remove_project_from(&board::default_registry_path(), &id)
 }
 
+/// Tauri command：采集每个项目的本地 git 状态（HEAD / 脏 / ahead / behind），供前端算同步徽章。
+/// 纯读 git 元信息，不改任何文件。永不 panic。
+#[tauri::command]
+fn load_local_sync() -> Vec<LocalGitStatus> {
+    sync::local_sync()
+}
+
+/// Tauri command：拉服务器聚合的 board.json（含每项目服务器侧 commit + generated_at）。
+/// 「App 端零网络」铁律的受控例外之二：仅只读拉取自有服务器，受 TB_BOARD_URL 开关。
+/// 未配置 → Ok(None)（远端同步关闭）；网络错误 → Err（前端 toast，本地看板照常）。
+#[tauri::command]
+fn load_remote_board() -> Result<Option<serde_json::Value>, String> {
+    sync::fetch_remote_board()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -94,9 +110,6 @@ pub fn run() {
                     .unwrap_or_else(|| std::path::Path::new(".")),
             );
             watcher::spawn(app.handle().clone());
-            // 「手机查看」：启动即推一次初始快照，手机端不必等到首次文件变化才有数据。
-            // 受 TB_PUSH_URL 控制，未配置则 no-op（见 push.rs）。
-            push::push_board_async();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -105,7 +118,9 @@ pub fn run() {
             open_progress,
             open_in_editor,
             add_project,
-            remove_project
+            remove_project,
+            load_local_sync,
+            load_remote_board
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

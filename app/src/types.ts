@@ -59,3 +59,32 @@ export interface AddResult {
   path: string;
   created_template: boolean;
 }
+
+// ───────────────────────── 设备间同步 ─────────────────────────
+
+// 单项目本地 git 状态（load_local_sync command 返回，与 Rust sync::LocalGitStatus 对应）。
+export interface LocalGitStatus {
+  id: string;
+  head: string; // 本地 HEAD SHA；非 git / 取不到 → ""
+  dirty: boolean; // 工作区有未提交改动
+  ahead: boolean; // 本地有未 push 的提交
+  behind: boolean; // 上游有未 pull 的提交
+  is_git: boolean;
+}
+
+// 同步徽章种类。前端按「本地 HEAD vs 服务器 commit + 本地 git 状态」算出。
+export type SyncKind =
+  | "synced" // 本地 HEAD == 服务器 commit 且工作区干净
+  | "dirty" // 工作区有未提交改动
+  | "ahead" // 本地领先（有未 push 提交）
+  | "behind" // 本地落后（服务器/上游更新）
+  | "diverged" // 本地与服务器 commit 不一致且方向不明
+  | "offline" // 远端未配置 / 拉不到，无对比基准
+  | "unknown"; // 非 git 仓库 / 信息不足
+
+// 卡片上要展示的同步状态（已算好文案与种类）。
+export interface SyncBadge {
+  kind: SyncKind;
+  label: string; // 中文短文案，如「已同步」「待推送」
+  title: string; // hover 详细说明
+}

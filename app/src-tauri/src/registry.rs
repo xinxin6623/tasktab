@@ -97,6 +97,36 @@ fn kebab_case(name: &str) -> String {
     }
 }
 
+/// 探测项目 git remote，返回 owner/repo@branch；非 git / 无 origin / 解析失败 → None。
+/// 设备间同步用（与 cli/cra.py 的 detect_github 同逻辑，须保持一致）。纯只读 git，绝不改任何东西。
+fn detect_github(proj_dir: &Path) -> Option<String> {
+    if !proj_dir.join(".git").exists() {
+        return None;
+    }
+    let git = |args: &[&str]| -> Option<String> {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(proj_dir)
+            .args(args)
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
+    };
+    let url = git(&["remote", "get-url", "origin"])?;
+    let branch = git(&["rev-parse", "--abbrev-ref", "HEAD"])?;
+    // 提取 owner/repo（去 .git 后缀），兼容 https 与 ssh remote。最后一个 ':' 或 '/' 后取两段。
+    let trimmed = url.trim_end_matches(".git");
+    let after = trimmed.rsplit([':', '/']).take(2).collect::<Vec<_>>();
+    if after.len() != 2 || after[0].is_empty() || after[1].is_empty() {
+        return None;
+    }
+    // rsplit 取出的是反序：[repo, owner]
+    Some(format!("{}/{}@{}", after[1], after[0], branch))
+}
+
 // ───────────────────────── registry 读 / 原子写 ─────────────────────────
 
 /// 极简 registry 表示：保留原始 projects 为有序映射列表，写回时按 cra.py 字段顺序输出。
@@ -114,6 +144,8 @@ struct ProjectEntry {
     progress_file: String,
     pinned: bool,
     added: String,
+    /// 设备间同步：owner/repo@branch（缺省 None，写回时不输出该行）。与 cra.py 的 github 字段对齐。
+    github: Option<String>,
 }
 
 fn read_registry(path: &Path) -> Result<RegistryDoc, String> {
@@ -166,6 +198,7 @@ fn read_registry(path: &Path) -> Result<RegistryDoc, String> {
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false),
                 added: get_str("added").unwrap_or_default(),
+                github: get_str("github").filter(|s| !s.is_empty()),
             });
         }
     }
@@ -254,6 +287,10 @@ fn write_registry_atomic(path: &Path, doc: &RegistryDoc) -> Result<(), String> {
             ));
             out.push_str(&format!("  pinned: {}\n", if p.pinned { "true" } else { "false" }));
             out.push_str(&format!("  added: {}\n", yaml_scalar(&p.added)));
+            // 设备间同步：github 字段在 added 之后输出（与 cra.py 的字段插入顺序一致，保证 byte-identical）。
+            if let Some(gh) = &p.github {
+                out.push_str(&format!("  github: {}\n", yaml_scalar(gh)));
+            }
         }
     }
 
@@ -346,6 +383,8 @@ pub fn add_project_to(
         progress_file: PROGRESS_FILENAME.to_string(),
         pinned: false,
         added: today_iso(),
+        // 设备间同步：探测项目 git remote 自动填 owner/repo@branch（与 cra.py detect_github 同逻辑）。
+        github: detect_github(&proj_dir),
     });
     write_registry_atomic(registry_path, &doc)?;
 
@@ -393,6 +432,37 @@ mod tests {
         assert_eq!(kebab_case("  --weird-- "), "weird");
         assert_eq!(kebab_case("语音管线"), "语音管线");
         assert_eq!(kebab_case("@@@"), "project");
+    }
+
+    // detect_github：非 git 目录 → None；真实 git repo（含 https/ssh remote）→ owner/repo@branch。
+    #[test]
+    fn test_detect_github() {
+        let tmp = unique_tmp();
+        // 非 git 目录
+        let plain = tmp.join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(detect_github(&plain), None);
+
+        // 真实 git repo + https origin
+        let repo = tmp.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap()
+        };
+        if !git(&["init", "-q"]).status.success() {
+            eprintln!("跳过：环境无 git");
+            return;
+        }
+        git(&["config", "user.email", "t@t"]);
+        git(&["config", "user.name", "t"]);
+        git(&["checkout", "-q", "-b", "main"]);
+        git(&["commit", "-q", "--allow-empty", "-m", "x"]);
+        git(&["remote", "add", "origin", "https://github.com/xinxin6623/tasktab.git"]);
+        assert_eq!(detect_github(&repo).as_deref(), Some("xinxin6623/tasktab@main"));
+
+        // ssh remote 也应解析成同样的 owner/repo
+        git(&["remote", "set-url", "origin", "git@github.com:xinxin6623/tasktab.git"]);
+        assert_eq!(detect_github(&repo).as_deref(), Some("xinxin6623/tasktab@main"));
     }
 
 

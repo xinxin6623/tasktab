@@ -108,13 +108,12 @@ fn run_watch_loop(app_handle: AppHandle) -> Result<(), String> {
         }
 
         // 通知前端重拉看板（增量或整体都可，这里整体重拉，最简单且 load_board 很轻）。
+        // 注：新「设备间同步」方案下，服务器自己从 GitHub 聚合看板，App 不再向服务器推送
+        //（旧 push.rs 已退役到 archive/）。这里只发本地「板子变了」信号，前端收到后顺带
+        // 重拉一次远端 board.json + 本地 git 状态刷新同步徽章（见前端 App.tsx）。
         if let Err(e) = app_handle.emit(EVENT_BOARD_CHANGED, ()) {
             eprintln!("[watcher] emit board-changed 失败: {e}");
         }
-
-        // 「手机查看」：文件一变，顺带把最新看板快照单向推到 James 的服务器（受 TB_PUSH_URL 控制，
-        // 未配置则 no-op）。异步、失败只记日志，绝不影响桌面看板。详见 push.rs 的架构边界说明。
-        crate::push::push_board_async();
     }
 
     Ok(())

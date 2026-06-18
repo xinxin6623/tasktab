@@ -29,16 +29,20 @@
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
 ### 概述
-**「手机查看」已上线 —— 手机打开 https://kanban.alphaxbot.xyz 即看实时看板（桌面 App 文件一变就推）；继续 v1.0 开发，定稿后 install.sh 正式打包**
+**「设备间同步」代码就位（四端全绿）—— 待 ① 真机点开桌面 App 看同步徽章 ② 服务器重新部署注入 TB_REGISTRY/TB_GH_TOKEN 切到聚合模式**
 
 ### 明细
-**2026-06-17**：「手机查看」功能上线。App 把已解析的 board.json 单向推到火山云 ECS，手机浏览器只读渲染卡片，文件一变看板秒级跟随：
+**2026-06-18**：「设备间同步」改造完成。架构从「App 推送」反转为「GitHub 单一真相 → 服务器聚合 → 各端只读」，两台设备各自 push 到 GitHub 即同步看板。代码四端全绿、本地真实聚合已验证，剩两个需真机/服务器的收尾：
 
-- 服务端 `server/`：纯标准库 Go 单文件（`POST /ingest` 原子写 + 静态托管移动端只读网页），已部署为 swarm service `tasktab-board`（scratch 镜像 4.89MB、限 64M 内存），Traefik 路由 `server/deploy/tasktab-kanban.yml` 绑 `kanban.alphaxbot.xyz`，LE 证书自动签。
-- App 端 `push.rs`：ureq 单向 POST，受 `TB_PUSH_URL` 开关（未设则功能关闭、行为不变），挂在 watcher emit 后 + 启动初始推一次。「App 端零网络」铁律的唯一受控例外（仅单向输出）。
-- 推送地址走 `.dev/push.env`（gitignore，dev-detached.sh 启动时 source），不硬编码、不进 git。真机已验证：App 启动实推真实看板（6 项目）。
+- 服务端 `server/`：`github.go`（GitHub API 拉各 repo 三件套+commit，并发，7 repo ~3s）+ `parse.go`（Go 重写解析，逐函数对齐 `board.rs`，`parse_test.go` 同源断言）+ `main.go` 聚合循环（`TB_REGISTRY` 启用）。board.json 新增 `commit`/`generated_at`。
+- App 端：`push.rs` 退役（→ `archive/push-retired/`），新增 `sync.rs`（只读 git 状态 + 只读拉 board.json）。前端 `sync.ts` 算同步徽章（已同步/待推送/待拉取/未提交/分叉），卡片显示徽章、顶栏显示服务器聚合时间。「App 端零网络」收敛为「仅两个受控只读例外」。
+- registry 加 `github` 字段（owner/repo@branch），`cra` + App 内 add 都自动探测 git remote 填充。
 
-旧尾巴（不阻塞）：`scripts/install.sh` 第 19/59-65 行仍装已退役 progress-tracker，打包前清掉；dev 模式真机点开桌面看板终验各卡片。`install.sh` 正式打包路径也需把 `TB_PUSH_URL` 配置注入（目前只 dev 脚本带）。
+**待办**（两个，需真机/服务器，不阻塞代码）：
+1. 真机：`./scripts/dev-detached.sh` 起桌面 App（先在 `.dev/push.env` 填 `TB_BOARD_URL`），点开看同步徽章是否正确。
+2. 服务器：重新部署 `server/`，给 swarm service 注入 `TB_REGISTRY`（GitHub 坐标）+ `TB_GH_TOKEN`（PAT，走 secret）+ `TB_POLL_SEC`，切到聚合模式（外向操作，需先确认）。
+
+旧尾巴（不阻塞）：`scripts/install.sh` 仍装已退役 progress-tracker，打包前清掉；install.sh 正式打包路径需注入 `TB_BOARD_URL`。
 
 ## 项目简介
 

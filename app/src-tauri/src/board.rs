@@ -729,6 +729,28 @@ pub fn collect_watched_files_from(registry_path: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// 返回 registry 里每个项目的 (id, path 原文)，供 sync.rs 采集本地 git 状态。
+/// 防御性：registry 缺失/损坏 → 空列表（不报错）。path 保留原文（含未展开的 ~），调用方自行展开。
+pub fn registry_entries() -> Vec<(String, String)> {
+    registry_entries_from(&default_registry_path())
+}
+
+fn registry_entries_from(registry_path: &Path) -> Vec<(String, String)> {
+    let raw = match std::fs::read_to_string(registry_path) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    let registry: Registry = match serde_yaml::from_str(&raw) {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+    registry
+        .projects
+        .iter()
+        .map(|e| (e.id.clone(), e.path.clone()))
+        .collect()
+}
+
 // ───────────────────────── 详情页：load_project（M3）─────────────────────────
 
 /// 单项目详情：复用卡片字段 + PROGRESS.md frontmatter 之后的正文原文（markdown 由前端确定性渲染）。
@@ -803,7 +825,11 @@ pub fn load_project(project_id: &str) -> Result<ProjectDetail, String> {
     load_project_from(&default_registry_path(), project_id)
 }
 
-// ───────────────────────── 「手机查看」：带详情的推送快照 ─────────────────────────
+// ───────────────────────── 「手机查看」：带详情的推送快照（push.rs 退役后不再调用）─────────────────────────
+//
+// ⚠️ 退役说明（2026-06-18）：下面的 PushBoard / load_push_board 系列原供已退役的 push.rs 用
+// （App 单向推 board.json 到服务器）。「设备间同步」方案改为服务器自己从 GitHub 聚合，App 不再推。
+// 这些结构暂保留（与服务器 Go 输出 schema 同源，留作参考 / 未来本地导出可能复用），标 allow 消警。
 //
 // 中文说明：桌面前端走 load_board（卡片级）+ 点开时 load_project（详情）两段式，
 // 详情是按需拉的。但手机镜像页没有 Tauri command 可调，所以推送时一次性把每个项目的
@@ -835,6 +861,7 @@ pub struct PushBoard {
 
 /// 组装带详情的推送快照。复用 load_board 的卡片解析 + 每项目的详情提取，全程防御性
 /// （文件/块缺失 → 字段取空，绝不报错），与零智能/零崩溃约束一致。
+#[allow(dead_code)]
 pub fn load_push_board_from(registry_path: &Path) -> PushBoard {
     let board = load_board_from(registry_path);
     let projects = board
@@ -863,7 +890,8 @@ pub fn load_push_board_from(registry_path: &Path) -> PushBoard {
     }
 }
 
-/// 默认入口：组装带详情的推送快照（push.rs 用）。
+/// 默认入口：组装带详情的推送快照（push.rs 退役后不再调用，保留作参考）。
+#[allow(dead_code)]
 pub fn load_push_board() -> PushBoard {
     load_push_board_from(&default_registry_path())
 }

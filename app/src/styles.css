@@ -138,6 +138,26 @@ body {
 .badge.done   { background: var(--done-bg);   color: var(--done-fg); }
 .badge.warn   { background: var(--warn-bg);   color: var(--warn-fg); }
 
+/* 设备间同步徽章（卡片底部右侧）。颜色语义：绿=已同步、黄=待动作、灰=离线/分叉。 */
+.sync-badge {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: default;
+}
+.sync-badge.synced   { background: #e3f4e8; color: #1f8a4c; }
+.sync-badge.dirty    { background: #fdeccd; color: #9a6500; }
+.sync-badge.ahead    { background: #dbe9ff; color: #1f5fbf; }
+.sync-badge.behind   { background: #ffe6d6; color: #b1521b; }
+.sync-badge.diverged { background: #f3e0f7; color: #8a3aa0; }
+.sync-badge.offline  { background: #ececec; color: #888; }
+
+/* 顶栏「看板服务器最后更新时间」 */
+.summary .count.sync-updated { color: var(--text-muted); }
+
 /* 进度条 */
 .progress {
   display: flex;

@@ -1,24 +1,31 @@
-// tasktab-board 服务端 —— 极简看板镜像服务（纯标准库，零外部依赖）
+// tasktab-board 服务端 —— 看板镜像服务（GitHub 聚合 + 静态托管）
 //
-// 中文说明（重要逻辑）：
-//   这是 TaskBoard「手机查看」功能的服务端。它本身零智能、不解析三件套——
-//   解析仍由 Mac App 的 Rust 后端做，App 把解析好的 board.json 单向 POST 过来，
-//   本服务只负责「收下来存好 + 静态托管看板网页」。设计目标：跑在 4GB ECS 上，
-//   常驻内存极小（纯标准库单二进制，约几 MB）。
+// 中文说明（重要逻辑 / 架构）：
+//   这是 TaskBoard「设备间同步 / 手机查看」功能的服务端。两台设备各自把三件套 push 到
+//   GitHub 各 repo，本服务【定时用 GitHub API 拉各 repo 的三件套 + 最新 commit】，在服务器侧
+//   用 parse.go（对齐 board.rs 契约）解析聚合成 board.json。各端（桌面 App / 手机网页）只读它。
+//   「文件同步到 GitHub = 过了看板」。聚合循环见 github.go::aggregate。
+//
+//   兼容：旧的 POST /ingest（App 单向推）仍保留作安全网——但 TB_REGISTRY 配置后由聚合循环
+//   接管 board.json，ingest 一般不再使用。
 //
 // 路由：
-//   POST /ingest      接收 App 推来的 board JSON，原子写入 dataPath（全公开，按 James 选择不鉴权）
-//   GET  /board.json  返回当前 board JSON（网页轮询拉取）
+//   GET  /board.json  返回当前聚合的 board JSON（网页/桌面 App 轮询拉取）
+//   POST /ingest      [兼容] 接收外部推来的 board JSON，原子写入（聚合模式下一般不用）
 //   GET  /            静态看板网页（web/index.html）
 //   GET  /healthz     健康检查
 //
-// 配置（环境变量，均有缺省）：
-//   TB_ADDR     监听地址，默认 ":8787"
-//   TB_DATA     board.json 落盘路径，默认 "./data/board.json"
-//   TB_WEB      静态网页目录，默认 "./web"
+// 配置（环境变量）：
+//   TB_ADDR       监听地址，默认 ":8787"
+//   TB_DATA       board.json 落盘路径，默认 "./data/board.json"
+//   TB_WEB        静态网页目录，默认 "./web"
+//   TB_REGISTRY   registry 来源："owner/repo@branch:path"(GitHub) 或本地路径。设置后启用聚合循环。
+//   TB_GH_TOKEN   GitHub PAT（读私有 repo 必需）
+//   TB_POLL_SEC   聚合轮询间隔秒，默认 60
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -43,6 +50,14 @@ func main() {
 	// 确保数据目录存在
 	if err := os.MkdirAll(filepath.Dir(dataPath), 0o755); err != nil {
 		log.Fatalf("无法创建数据目录: %v", err)
+	}
+
+	// 聚合循环：配置了 TB_REGISTRY 即启用「GitHub 拉取 → 解析 → 写 board.json」后台循环。
+	// 未配置则退回旧的纯 ingest 模式（向后兼容）。
+	if regSpec := os.Getenv("TB_REGISTRY"); regSpec != "" {
+		go runAggregateLoop(context.Background(), regSpec, dataPath)
+	} else {
+		log.Printf("未设置 TB_REGISTRY，运行在兼容模式（仅 /ingest），不做 GitHub 聚合")
 	}
 
 	mux := http.NewServeMux()
@@ -102,6 +117,48 @@ func main() {
 	log.Printf("tasktab-board 启动：监听 %s，数据 %s，网页 %s", addr, dataPath, webDir)
 	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("服务退出: %v", err)
+	}
+}
+
+// runAggregateLoop 后台聚合循环：每 TB_POLL_SEC 秒拉一次 registry + 各 repo 三件套，
+// 解析聚合后原子写入 dataPath。任一轮失败只打日志、保留上轮 board.json，绝不退出。
+func runAggregateLoop(ctx context.Context, regSpec, dataPath string) {
+	gh := newGHClient(os.Getenv("TB_GH_TOKEN"))
+	interval := time.Duration(pollSeconds()) * time.Second
+	if os.Getenv("TB_GH_TOKEN") == "" {
+		log.Printf("[aggregate] ⚠ 未设置 TB_GH_TOKEN，私有 repo 将拉取失败、限流极低")
+	}
+	log.Printf("[aggregate] 启用 GitHub 聚合：registry=%s 间隔=%s", regSpec, interval)
+
+	runOnce := func() {
+		reg, err := loadRegistry(gh, regSpec)
+		if err != nil {
+			log.Printf("[aggregate] 读取 registry 失败（保留上轮数据）: %v", err)
+			return
+		}
+		board := aggregate(reg, gh)
+		data, err := json.Marshal(board)
+		if err != nil {
+			log.Printf("[aggregate] 序列化失败: %v", err)
+			return
+		}
+		if err := atomicWrite(dataPath, data); err != nil {
+			log.Printf("[aggregate] 写盘失败: %v", err)
+			return
+		}
+		log.Printf("[aggregate] 已更新 board.json（%d 项目，%d 字节）", len(board.Projects), len(data))
+	}
+
+	runOnce() // 启动即拉一次，不等第一个 tick
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			runOnce()
+		}
 	}
 }
 
