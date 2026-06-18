@@ -179,7 +179,10 @@
       }
       const pct = Math.round(p.overall_progress || 0);
       const blocked = p.blocked_by || [];
-      const stages = p.stages || [];
+      // 阶段结构化数据在 stage_items（{name,desc,done}）；stages 只是名称字符串数组（向后兼容降级）。
+      const stages = (p.stage_items && p.stage_items.length)
+        ? p.stage_items
+        : (p.stages || []).map(s => (typeof s === "string" ? { name: s, done: false } : s));
       let h = `<div class="detail-wrap">`;
       h += `<div class="progress detail-block"><div class="progress-track"><div class="progress-fill" style="width:${pct}%"></div></div>
             <div class="progress-meta"><span>整体进度</span><span>${pct}%</span></div></div>`;
