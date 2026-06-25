@@ -29,8 +29,7 @@
 > 此段是项目"下一步动作"导航位，**永远只保留最新一条**，覆盖式更新。拆 `### 概述`（App 标签页只抓这段）+ `### 明细`（给人看的展开）。详见 docs/trio-protocol.md §3。
 
 ### 概述
-**线上服务端已切 GitHub 聚合模式并验证成功（board.json 带 generated_at + 7 项目 commit）—— 待真机点桌面 App 看同步徽章是否正确**
-**隐患：旧 push 源仍可 POST /ingest 覆盖聚合数据，待在聚合模式下禁用该路由**
+**真机终验同步徽章 + v1.0 打包发布：起桌面 App（.dev/push.env 填 TB_BOARD_URL）看徽章，再走 install.sh 打包（打包前清退役 progress-tracker、注入 TB_BOARD_URL）**
 
 ### 明细
 **2026-06-19 切换完成**：线上 `tasktab-board` 服务端已从旧 push 模式切到 GitHub 聚合并验证成功——`https://kanban.alphaxbot.xyz/board.json` 出现 `generated_at` + 7 项目各自 `commit` SHA、`registry_error=null`、各项目无 error。环境变量 `TB_REGISTRY=xinxin6623/tasktab@main:server/registry.yaml` + `TB_GH_TOKEN` + `TB_POLL_SEC=60` 已注入 swarm service，日志 `[ingest]`→`[aggregate] 已更新 board.json（7 项目）`。
@@ -51,8 +50,9 @@
 
 **待办：**
 1. 真机：`./scripts/dev-detached.sh` 起桌面 App（先在 `.dev/push.env` 填 `TB_BOARD_URL=https://kanban.alphaxbot.xyz/board.json`），点开看同步徽章是否正确。
-2. 隐患（建议尽早）：旧 push 源（某设备旧版 App）仍可 `POST /ingest` 覆盖聚合的 board.json；在聚合模式下禁用 `/ingest` 路由彻底杜绝。**两份解析同源铁律不涉及**，仅改 server 路由层。
-3. 旧尾巴（不阻塞）：`scripts/install.sh` 仍装已退役 progress-tracker，打包前清掉；install.sh 正式打包路径需注入 `TB_BOARD_URL`。
+2. 旧尾巴（不阻塞）：`scripts/install.sh` 仍装已退役 progress-tracker，打包前清掉；install.sh 正式打包路径需注入 `TB_BOARD_URL`。
+
+> 2026-06-19 补：聚合模式下 `/ingest` 已禁用（返回 409，`server/main.go:71`），旧 push 源覆盖隐患消除。
 
 > ⚠️ 服务端是外向操作，按守则改动前先与 James 确认。本次切换的 token 用完即弃需 revoke。
 
@@ -69,6 +69,9 @@ flowchart TD
   C --> D[前端卡片+详情页渲染]
   E[FSEvents 监听] -.文件变.-> C
   F[outkanban/wrap-up 写入端] --> A
+  A -- push --> G[GitHub 各 repo]
+  G --> H[server/ 聚合 board.json]
+  H --> I[手机网页只读]
 ```
 
 ## 项目进度
