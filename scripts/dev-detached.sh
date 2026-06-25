@@ -35,7 +35,15 @@ if [ -f "$PID_FILE" ]; then
   fi
 fi
 
-command -v pnpm >/dev/null 2>&1 || { warn "未检测到 pnpm"; exit 1; }
+# 包管理器：优先 pnpm，没装则回退 npm（f2bd027 起构建命令已切 npm，两者皆可驱动 tauri dev）
+# pnpm 可省略 run；npm 必须用 "run tauri"（package.json 的 tauri script），"npm tauri" 无效
+if command -v pnpm >/dev/null 2>&1; then
+  TAURI_CMD=(pnpm tauri dev)
+elif command -v npm >/dev/null 2>&1; then
+  TAURI_CMD=(npm run tauri dev)
+else
+  warn "未检测到 pnpm 或 npm"; exit 1
+fi
 
 # 设备间同步配置：若存在 .dev/push.env（gitignore，James 自填），source 进来，
 # 让 tauri dev 继承 TB_BOARD_URL（App 据此只读拉服务器 board.json 算同步徽章；
@@ -50,7 +58,7 @@ fi
 log "独立启动 TaskBoard dev（脱离当前终端，关 VSCode 不影响）"
 # nohup + 重定向 + & 让进程脱离终端会话；disown 进一步从作业表摘除
 cd "$APP_DIR"
-nohup pnpm tauri dev > "$LOG_FILE" 2>&1 &
+nohup "${TAURI_CMD[@]}" > "$LOG_FILE" 2>&1 &
 NEW_PID="$!"
 echo "${NEW_PID}" > "$PID_FILE"
 
