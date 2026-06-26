@@ -41,3 +41,7 @@ projects:
   name: deep-verify
   github: xinxin6623/deep-verify@main
   pinned: false
+- id: loop-runing
+  name: loop-runing
+  github: xinxin6623/loop-runing@main
+  pinned: false
