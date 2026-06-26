@@ -32,3 +32,7 @@ projects:
   name: Tender-monitor
   pinned: false
   github: xinxin6623/Tender-monitor0.1@main
+- id: llmbs
+  name: llmbs
+  pinned: false
+  github: xinxin6623/llmbs@main
