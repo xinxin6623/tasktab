@@ -37,3 +37,7 @@ projects:
   name: llmbs
   github: xinxin6623/llmbs@main
   pinned: false
+- id: deep-verify
+  name: deep-verify
+  github: xinxin6623/deep-verify@main
+  pinned: false
