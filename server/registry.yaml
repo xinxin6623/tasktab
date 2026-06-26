@@ -2,37 +2,38 @@
 # 服务器只用 id / name / github / pinned；不含本机绝对路径。
 # 字段 schema 见 同步看板files/02-实现步骤.md §1.2。
 # github 字段格式 owner/repo@branch，是服务器拉取锚点；缺该字段的项目降级为「未配置 github」。
+# ⚠ 本文件由 cra 自动生成（add/remove 时从本地真相源投影），勿手动编辑。
 version: 1
 projects:
 - id: cc-switch
   name: cc-switch
-  pinned: false
   github: xinxin6623/cc-switch@main
+  pinned: false
 - id: tasktab
   name: TaskBoard
-  pinned: false
   github: xinxin6623/tasktab@main
+  pinned: false
 - id: xiaozhi
   name: xiaozhi
-  pinned: false
   github: xinxin6623/xiaozhi-esp32@main
+  pinned: false
 - id: myskills
   name: myskills
-  pinned: false
   github: xinxin6623/myskills@main
+  pinned: false
 - id: photo-promo
   name: photo-promo
-  pinned: false
   github: xinxin6623/photo-promo@main
+  pinned: false
 - id: bizwiki
   name: bizwiki
-  pinned: false
   github: xinxin6623/bizwiki@main
+  pinned: false
 - id: tender-monitor
   name: Tender-monitor
-  pinned: false
   github: xinxin6623/Tender-monitor0.1@main
+  pinned: false
 - id: llmbs
   name: llmbs
-  pinned: false
   github: xinxin6623/llmbs@main
+  pinned: false

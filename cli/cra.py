@@ -33,6 +33,71 @@ DEFAULT_REGISTRY = "~/.ai-vault/taskboard/registry.yaml"
 REGISTRY_VERSION = 1
 PROGRESS_FILENAME = "PROGRESS.md"
 
+# 服务器镜像 registry：入库的精简副本，服务器从 GitHub 拉它聚合（见 server/README.md §58）。
+# 与本地真相源是【同一名单的两份】，cra 每次写本地真相源后自动投影同步到这里，
+# 杜绝两份漂移（历史上 llmbs 漏同步、bizwiki 分支笔误都是手动维护这份导致的）。
+# 字段刻意只留 id/name/github/pinned——不含本机绝对路径（既无意义又泄漏信息）。
+# 定位：环境变量 TB_SERVER_REGISTRY 优先；否则由 cra.py 自身位置反推 <仓>/server/registry.yaml。
+SERVER_REGISTRY_FIELDS = ("id", "name", "github", "pinned")
+SERVER_REGISTRY_HEADER = (
+    "# 看板镜像服务端读取的项目名单（单一真相）。\n"
+    "# 服务器只用 id / name / github / pinned；不含本机绝对路径。\n"
+    "# 字段 schema 见 同步看板files/02-实现步骤.md §1.2。\n"
+    "# github 字段格式 owner/repo@branch，是服务器拉取锚点；缺该字段的项目降级为「未配置 github」。\n"
+    "# ⚠ 本文件由 cra 自动生成（add/remove 时从本地真相源投影），勿手动编辑。\n"
+)
+
+
+def server_registry_path() -> Path | None:
+    """定位入库的 server/registry.yaml。
+    TB_SERVER_REGISTRY 环境变量优先（测试隔离 / 显式指定）；否则由 cra.py 真身位置
+    反推 <仓>/server/registry.yaml。cra.py 在 <仓>/cli/ 下，故 ../server/registry.yaml。
+    用 resolve() 解析软链（cra 常被软链到 PATH），保证拿到仓内真身而非链接位置。
+    找不到 server 目录 → None（同步降级为跳过，本地登记仍成功）。"""
+    override = os.environ.get("TB_SERVER_REGISTRY")
+    if override:
+        return Path(override).expanduser()
+    repo_root = Path(__file__).resolve().parent.parent
+    server_dir = repo_root / "server"
+    if not server_dir.is_dir():
+        return None
+    return server_dir / "registry.yaml"
+
+
+def sync_server_registry(reg: dict) -> None:
+    """把本地真相源 registry 投影成精简版，原子写进 server/registry.yaml。
+    只保留 id/name/github/pinned，剥掉 path/progress_file/added。带回头注释保持可读。
+    防御：定位不到 server 目录 → 仅警告不抛错（本地登记已成功，不能因同步失败而整体失败）。"""
+    path = server_registry_path()
+    if path is None:
+        click.echo("  ⚠ 未定位到 server/registry.yaml，跳过镜像同步（本地登记已生效）")
+        return
+    projects = []
+    for p in reg.get("projects", []):
+        slim = {k: p[k] for k in SERVER_REGISTRY_FIELDS if k in p}
+        projects.append(slim)
+    payload = {"version": reg.get("version", REGISTRY_VERSION), "projects": projects}
+    body = yaml.safe_dump(
+        payload, allow_unicode=True, sort_keys=False, default_flow_style=False
+    )
+    text = SERVER_REGISTRY_HEADER + body
+    # 原子写：同目录临时文件 → fsync → rename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=".registry.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp_name, path)
+    except Exception:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
+        raise
+    click.echo(f"  ✓ 已同步镜像 registry（{len(projects)} 项）: {path}")
+
 
 def registry_path() -> Path:
     """解析 registry 路径:优先环境变量 CRA_REGISTRY(测试隔离用),否则用契约默认值。
@@ -219,6 +284,7 @@ def add(path: str, name: str | None, github: str | None):
         entry["github"] = gh
     reg["projects"].append(entry)
     write_registry_atomic(reg)
+    sync_server_registry(reg)  # 投影到入库镜像 registry，保证两份不漂移
     click.echo(f"已登记: {project_id}  ({display_name})  -> {abs_path}")
     if gh:
         click.echo(f"  GitHub 来源: {gh}（设备间同步看板会从这里拉）")
@@ -237,6 +303,7 @@ def remove(project_id: str):
     if before == after:
         raise click.ClickException(f"未找到 id: {project_id}")
     write_registry_atomic(reg)
+    sync_server_registry(reg)  # 投影到入库镜像 registry，保证两份不漂移
     click.echo(f"已移除: {project_id}(项目文件未改动)")
 
 
