@@ -27,7 +27,7 @@ projects:
 - id: bizwiki
   name: bizwiki
   pinned: false
-  github: xinxin6623/bizwiki@phase5-business-events
+  github: xinxin6623/bizwiki@main
 - id: tender-monitor
   name: Tender-monitor
   pinned: false
