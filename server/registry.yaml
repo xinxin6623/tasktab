@@ -45,3 +45,7 @@ projects:
   name: loop-runing
   github: xinxin6623/loop-runing@main
   pinned: false
+- id: pptweb
+  name: pptweb
+  github: xinxin6623/pptweb@main
+  pinned: false
